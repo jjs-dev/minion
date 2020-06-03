@@ -24,10 +24,30 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions-rs/toolchain@v1.0.6
-      with:
-        toolchain: stable
-        components: clippy
-    - name: Run clippy
-      run: cargo clippy --workspace -- -Dclippy::all
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1.0.6
+        with:
+          toolchain: stable
+          components: clippy
+      - name: Run clippy
+        run: cargo clippy --workspace -- -Dclippy::all
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1.0.6
+        with: 
+          toolchain: stable
+      - name: Compile tests
+        run: |
+          mkdir build
+          cd build
+          cmake ../minion-ffi/tests
+          cmake --build .
+      - name: Run tests
+        run: |
+          cd build
+          
+          # TODO
+          # sudo ./mft
+      

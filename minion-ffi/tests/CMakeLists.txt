@@ -3,7 +3,7 @@ project(JjsMinionFfiTests)
 
 set(MINION_HEADER ${CMAKE_CURRENT_BINARY_DIR}/minion-ffi.h)
 set(CRATE ${CMAKE_SOURCE_DIR}/..)
-set(JJS_SRC_ROOT ${CMAKE_SOURCE_DIR}/../../..)
+set(JJS_SRC_ROOT ${CMAKE_SOURCE_DIR}/../..)
 set(JJS_TARGET_DIR ${JJS_SRC_ROOT}/target)
 add_custom_target(minion_ffi_headers
         COMMAND cp ${JJS_TARGET_DIR}/minion-ffi.h ${CMAKE_CURRENT_BINARY_DIR}/minion-ffi.h &&
