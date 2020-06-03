@@ -18,7 +18,9 @@ jobs:
           toolchain: stable
           components: rustfmt
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: | 
+          rm -rf .cargo
+          cargo fmt --all -- --check
   clippy:
     runs-on: ubuntu-latest
     steps:
@@ -28,7 +30,9 @@ jobs:
           toolchain: stable
           components: clippy
       - name: Run clippy
-        run: cargo clippy --workspace -- -Dclippy::all
+        run: |
+          rm -rf .cargo
+          cargo clippy --workspace -- -Dclippy::all
   tests:
     runs-on: ubuntu-latest
     steps:
@@ -38,6 +42,7 @@ jobs:
           toolchain: stable
       - name: Compile tests
         run: |
+          rm -rf .cargo
           mkdir build
           cd build
           cmake ../minion-ffi/tests
@@ -57,7 +62,9 @@ jobs:
           toolchain: nightly
           override: true
       - name: Run special lints
-        run: cargo check --workspace
+        run: |
+          rm -rf .cargo
+          cargo check --workspace
         env:
           RUSTFLAGS: -Wunused-crate-dependencies --cfg minion_nightly
       
