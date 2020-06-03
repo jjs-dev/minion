@@ -19,3 +19,4 @@ backtrace = "0.3.46"
 thiserror = "1.0.15"
 
 [workspace]
+members = ["minion-ffi", "."]

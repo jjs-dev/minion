@@ -8,7 +8,7 @@ edition = "2018"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-minion = {path = "../minion"}
+minion = {path = ".."}
 
 [build-dependencies]
 cbindgen = { version = "0.14.1", default-features = false }
