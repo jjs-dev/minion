@@ -1,5 +1,5 @@
-#![feature(try_trait)]
-
+#![cfg_attr(minion_nightly, feature(unsafe_block_in_unsafe_fn))]
+#![cfg_attr(minion_nightly, warn(unsafe_op_in_unsafe_fn))]
 use minion::{self, Dominion as _};
 use std::{
     ffi::{CStr, OsStr, OsString},
@@ -46,26 +46,6 @@ unsafe fn get_string(buf: *const c_char) -> OsString {
     let buf = buf.to_bytes();
     let s = OsStr::from_bytes(buf);
     s.to_os_string()
-}
-
-impl std::ops::Try for ErrorCode {
-    type Error = ErrorCode;
-    type Ok = ErrorCode;
-
-    fn into_result(self) -> Result<ErrorCode, ErrorCode> {
-        match self {
-            ErrorCode::Ok => Ok(ErrorCode::Ok),
-            oth => Err(oth),
-        }
-    }
-
-    fn from_error(x: ErrorCode) -> Self {
-        x
-    }
-
-    fn from_ok(x: ErrorCode) -> Self {
-        x
-    }
 }
 
 pub struct Backend(Box<dyn minion::Backend>);

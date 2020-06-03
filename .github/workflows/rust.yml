@@ -8,8 +8,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTC_BOOTSTRAP: 1
-
 jobs:
   fmt:
     runs-on: ubuntu-latest
@@ -50,4 +48,16 @@ jobs:
           
           # TODO
           # sudo ./mft
+  nightly-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1.0.6
+        with:
+          toolchain: nightly
+          override: true
+      - name: Run special lints
+        run: cargo check --workspace
+        env:
+          RUSTFLAGS: -Wunused-crate-dependencies --cfg minion_nightly
       
