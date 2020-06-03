@@ -16,24 +16,28 @@ pub(in crate::linux) struct SetupData {
     pub(in crate::linux) cgroups: super::cgroup::Group,
 }
 
-unsafe fn configure_dir(dir_path: &Path) {
-    let mode = libc::S_IRUSR
-        | libc::S_IWUSR
-        | libc::S_IXUSR
-        | libc::S_IRGRP
-        | libc::S_IWGRP
-        | libc::S_IXGRP
-        | libc::S_IROTH
-        | libc::S_IWOTH
-        | libc::S_IXOTH;
+fn configure_dir(dir_path: &Path) -> crate::Result<()> {
+    use nix::sys::stat::Mode;
+    let mode = Mode::S_IRUSR
+        | Mode::S_IWUSR
+        | Mode::S_IXUSR
+        | Mode::S_IRGRP
+        | Mode::S_IWGRP
+        | Mode::S_IXGRP
+        | Mode::S_IROTH
+        | Mode::S_IWOTH
+        | Mode::S_IXOTH;
     let path = CString::new(dir_path.as_os_str().as_bytes()).unwrap();
-    if libc::chmod(path.as_ptr(), mode) == -1 {
-        err_exit("chmod");
-    }
-
-    if libc::chown(path.as_ptr(), SANDBOX_INTERNAL_UID, SANDBOX_INTERNAL_UID) == -1 {
-        err_exit("chown");
-    }
+    nix::sys::stat::fchmodat(
+        None,
+        path.as_c_str(),
+        mode,
+        nix::sys::stat::FchmodatFlags::FollowSymlink,
+    )?;
+    let uid = nix::unistd::Uid::from_raw(SANDBOX_INTERNAL_UID);
+    let gid = nix::unistd::Gid::from_raw(SANDBOX_INTERNAL_UID);
+    nix::unistd::chown(path.as_c_str(), Some(uid), Some(gid))?;
+    Ok(())
 }
 
 fn expose_dir(jail_root: &Path, system_path: &Path, alias_path: &Path, access: DesiredAccess) {
@@ -87,7 +91,7 @@ extern "C" fn exit_sighandler(_code: i32) {
     }
 }
 
-unsafe fn setup_sighandler() {
+fn setup_sighandler() {
     use nix::sys::signal;
     for &death in &[
         signal::Signal::SIGABRT,
@@ -97,8 +101,10 @@ unsafe fn setup_sighandler() {
         let handler = signal::SigHandler::SigDfl;
         let action =
             signal::SigAction::new(handler, signal::SaFlags::empty(), signal::SigSet::empty());
-
-        signal::sigaction(death, &action).expect("Couldn't setup sighandler");
+        // Safety: default action is correct
+        unsafe {
+            signal::sigaction(death, &action).expect("Couldn't setup sighandler");
+        }
     }
     {
         let sigterm_handler = signal::SigHandler::Handler(exit_sighandler);
@@ -107,25 +113,22 @@ unsafe fn setup_sighandler() {
             signal::SaFlags::empty(),
             signal::SigSet::empty(),
         );
-        signal::sigaction(signal::Signal::SIGTERM, &action)
-            .expect("Failed to setup SIGTERM handler");
+        // Safety: `sigterm_handler` only calls allowed functions
+        unsafe {
+            signal::sigaction(signal::Signal::SIGTERM, &action)
+                .expect("Failed to setup SIGTERM handler");
+        }
     }
 }
 
-unsafe fn setup_chroot(jail_options: &JailOptions) {
+fn setup_chroot(jail_options: &JailOptions) -> crate::Result<()> {
     let path = &jail_options.isolation_root;
-    let path = CString::new(path.as_os_str().as_bytes()).unwrap();
-    libc::open(path.as_ptr(), 0);
-    if libc::chroot(path.as_ptr()) == -1 {
-        err_exit("chroot");
-    }
-    let path_root = CString::new("/").unwrap();
-    if libc::chdir(path_root.as_ptr()) == -1 {
-        err_exit("chdir");
-    }
+    nix::unistd::chroot(path)?;
+    nix::unistd::chdir("/")?;
+    Ok(())
 }
 
-unsafe fn setup_procfs(jail_options: &JailOptions) {
+fn setup_procfs(jail_options: &JailOptions) -> crate::Result<()> {
     let procfs_path = jail_options.isolation_root.join(Path::new("proc"));
     match fs::create_dir(&procfs_path) {
         Ok(_) => (),
@@ -134,21 +137,23 @@ unsafe fn setup_procfs(jail_options: &JailOptions) {
             _ => Err(e).unwrap(),
         },
     }
-    let proc = CString::new("proc").unwrap();
-    let targ = CString::new(procfs_path.as_os_str().as_bytes()).unwrap();
-    let mret = libc::mount(proc.as_ptr(), targ.as_ptr(), proc.as_ptr(), 0, ptr::null());
-    if -1 == mret {
-        err_exit("mount")
-    }
+    nix::mount::mount(
+        Some("proc"),
+        procfs_path.as_path(),
+        Some("proc"),
+        nix::mount::MsFlags::empty(),
+        None::<&str>,
+    )?;
+    Ok(())
 }
 
-unsafe fn setup_uid_mapping(sock: &mut Socket) -> crate::Result<()> {
+fn setup_uid_mapping(sock: &mut Socket) -> crate::Result<()> {
     sock.wake(WM_CLASS_PID_MAP_READY_FOR_SETUP)?;
     sock.lock(WM_CLASS_PID_MAP_CREATED)?;
     Ok(())
 }
 
-unsafe fn setup_time_watch(jail_options: &JailOptions) -> crate::Result<()> {
+fn setup_time_watch(jail_options: &JailOptions) -> crate::Result<()> {
     let cpu_tl = jail_options.cpu_time_limit.as_nanos() as u64;
     let real_tl = jail_options.real_time_limit.as_nanos() as u64;
     observe_time(
@@ -159,7 +164,7 @@ unsafe fn setup_time_watch(jail_options: &JailOptions) -> crate::Result<()> {
     )
 }
 
-unsafe fn setup_expositions(options: &JailOptions) {
+fn setup_expositions(options: &JailOptions) {
     expose_dirs(&options.exposed_paths, &options.isolation_root);
 }
 
@@ -182,7 +187,7 @@ fn setup_panic_hook() {
     }));
 }
 
-pub(in crate::linux) unsafe fn setup(
+pub(in crate::linux) fn setup(
     jail_params: &JailOptions,
     sock: &mut Socket,
 ) -> crate::Result<SetupData> {
@@ -190,12 +195,12 @@ pub(in crate::linux) unsafe fn setup(
     setup_sighandler();
     // must be done before `configure_dir`.
     setup_uid_mapping(sock)?;
-    configure_dir(&jail_params.isolation_root);
+    configure_dir(&jail_params.isolation_root)?;
     setup_expositions(&jail_params);
-    setup_procfs(&jail_params);
+    setup_procfs(&jail_params)?;
     let handles = super::cgroup::setup_cgroups(&jail_params);
     setup_time_watch(&jail_params)?;
-    setup_chroot(&jail_params);
+    setup_chroot(&jail_params)?;
     sock.wake(WM_CLASS_SETUP_FINISHED)?;
     let mut logger = crate::linux::util::StraceLogger::new();
     writeln!(logger, "dominion {}: setup done", &jail_params.jail_id).unwrap();
@@ -205,7 +210,7 @@ pub(in crate::linux) unsafe fn setup(
 
 /// Internal function, kills processes which used all their CPU time limit.
 /// Limits are given in nanoseconds
-unsafe fn cpu_time_observer(
+fn cpu_time_observer(
     jail_id: &str,
     cpu_time_limit: u64,
     real_time_limit: u64,
@@ -215,7 +220,7 @@ unsafe fn cpu_time_observer(
     writeln!(logger, "dominion {}: cpu time watcher", jail_id).unwrap();
     let start = time::Instant::now();
     loop {
-        libc::sleep(1);
+        nix::unistd::sleep(1);
 
         let elapsed = time::Instant::now().duration_since(start);
         let elapsed = elapsed.as_nanos();
@@ -247,22 +252,18 @@ unsafe fn cpu_time_observer(
     }
 }
 
-unsafe fn observe_time(
+fn observe_time(
     jail_id: &str,
     cpu_time_limit: u64,
     real_time_limit: u64,
     chan: Handle,
 ) -> crate::Result<()> {
-    let fret = libc::fork();
-    if fret == -1 {
-        crate::errors::System {
-            code: nix::errno::errno(),
+    let fret = nix::unistd::fork()?;
+
+    match fret {
+        nix::unistd::ForkResult::Child => {
+            cpu_time_observer(jail_id, cpu_time_limit, real_time_limit, chan)
         }
-        .fail()?;
-    }
-    if fret == 0 {
-        cpu_time_observer(jail_id, cpu_time_limit, real_time_limit, chan)
-    } else {
-        Ok(())
+        nix::unistd::ForkResult::Parent { .. } => Ok(()),
     }
 }

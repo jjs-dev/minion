@@ -13,17 +13,20 @@ use crate::linux::{
     util::{duplicate_string, err_exit, ExitCode, Handle, IpcSocketExt, Pid, Uid},
 };
 use libc::{c_char, c_void};
+use nix::sys::time::TimeValLike;
 use std::{
     ffi::{CString, OsStr, OsString},
-    fs, mem,
+    fs,
+    io::Write,
+    mem,
     os::unix::ffi::OsStrExt,
     path::PathBuf,
     ptr, time,
 };
 use tiny_nix_ipc::Socket;
 
+use jail_common::ZygoteStartupInfo;
 use setup::SetupData;
-use std::io::Write;
 
 const SANDBOX_INTERNAL_UID: Uid = 179;
 
@@ -230,7 +233,7 @@ extern "C" fn do_exec(mut arg: DoExecArg) -> ! {
     }
 }
 
-unsafe fn spawn_job(
+fn spawn_job(
     options: JobOptions,
     setup_data: &SetupData,
     jail_id: String,
@@ -250,23 +253,20 @@ unsafe fn spawn_job(
         cgroups_tasks: &setup_data.cgroups,
         jail_id: &jail_id,
     };
-    let child_pid: Pid;
-    let res = libc::fork();
-    if res == -1 {
-        err_exit("fork");
-    }
-    if res == 0 {
-        // Child
-        do_exec(dea);
-    }
+    let res = nix::unistd::fork()?;
+    let child_pid = match res {
+        nix::unistd::ForkResult::Child => do_exec(dea),
+        nix::unistd::ForkResult::Parent { child } => child,
+    };
     // Parent
     dea.stdio.close_fds();
-    child_pid = res;
 
     // Now we can allow child to execve()
     sock.wake(WAIT_MESSAGE_CLASS_EXECVE_PERMITTED)?;
 
-    Ok(jail_common::JobStartupInfo { pid: child_pid })
+    Ok(jail_common::JobStartupInfo {
+        pid: child_pid.as_raw(),
+    })
 }
 
 const WM_CLASS_SETUP_FINISHED: &[u8] = b"WM_SETUP";
@@ -288,188 +288,208 @@ extern "C" fn timed_wait_waiter(arg: *mut c_void) -> *mut c_void {
         if wcode == -1 {
             err_exit("waitpid");
         }
-        let exit_code = if libc::WIFEXITED(waitstatus) {
+        let exit_code: i32 = if libc::WIFEXITED(waitstatus) {
             libc::WEXITSTATUS(waitstatus)
         } else {
             -libc::WTERMSIG(waitstatus)
         };
-        let message = format!("{}", exit_code);
-        let message = CString::new(message).unwrap();
-        libc::write(
-            arg.res_fd,
-            message.as_ptr() as *const _,
-            message.as_bytes().len(),
-        );
+        let message = exit_code.to_ne_bytes();
+        libc::write(arg.res_fd, message.as_ptr() as *const _, message.len());
         ptr::null_mut()
     }
 }
 
 fn timed_wait(pid: Pid, timeout: Option<time::Duration>) -> crate::Result<Option<ExitCode>> {
-    unsafe {
-        let (mut end_r, mut end_w);
-        end_r = 0;
-        end_w = 0;
-        setup_pipe(&mut end_r, &mut end_w)?;
-        let mut waiter_pid: libc::pthread_t = std::mem::zeroed();
-        {
-            let mut arg = WaiterArg { res_fd: end_w, pid };
-            let ret = libc::pthread_create(
-                &mut waiter_pid as *mut _,
+    let (mut end_r, mut end_w);
+    end_r = 0;
+    end_w = 0;
+    setup_pipe(&mut end_r, &mut end_w)?;
+    let waiter_pid;
+    {
+        let mut arg = WaiterArg { res_fd: end_w, pid };
+        let mut wpid = unsafe { std::mem::zeroed() };
+        let ret = unsafe {
+            libc::pthread_create(
+                &mut wpid as *mut _,
                 ptr::null(),
                 timed_wait_waiter,
                 &mut arg as *mut WaiterArg as *mut c_void,
-            );
-            if ret != 0 {
-                errno::set_errno(errno::Errno(ret));
-                err_exit("pthread_create");
-            }
-        }
-        // TL&DR - select([ready_r], timeout)
-        let mut poll_fd_info: [libc::pollfd; 1];
-        poll_fd_info = mem::zeroed();
-        let mut poll_fd_ref = &mut poll_fd_info[0];
-        poll_fd_ref.fd = end_r;
-        poll_fd_ref.events = libc::POLLIN;
-        let mut rtimeout: libc::timespec = mem::zeroed();
-        let ptr_timeout;
-        match timeout {
-            Some(timeout) => {
-                rtimeout.tv_sec = timeout.as_secs() as i64;
-                rtimeout.tv_nsec = i64::from(timeout.subsec_nanos());
-                ptr_timeout = Some(&rtimeout);
-            }
-            None => {
-                ptr_timeout = None;
-            }
-        }
-        let ret = loop {
-            let poll_ret = libc::ppoll(
-                poll_fd_info.as_mut_ptr(),
-                1,
-                ptr_timeout
-                    .map(|p| p as *const _)
-                    .unwrap_or_else(std::ptr::null),
-                ptr::null(),
-            );
-            let ret: Option<_> = match poll_ret {
-                -1 => {
-                    let sys_err = nix::errno::errno();
-                    if sys_err == libc::EINTR {
-                        continue;
-                    }
-                    crate::errors::System { code: sys_err }.fail()?
-                }
-                0 => None,
-                1 => {
-                    let mut exit_code = [0; 16];
-                    let read_cnt = libc::read(end_r, exit_code.as_mut_ptr() as *mut c_void, 16);
-                    if read_cnt == -1 {
-                        err_exit("read");
-                    }
-                    let exit_code =
-                        String::from_utf8(exit_code[..read_cnt as usize].to_vec()).unwrap();
-                    Some(exit_code.parse().unwrap())
-                }
-                x => unreachable!("unexpected return code from poll: {}", x),
-            };
-            break ret;
+            )
         };
-        libc::pthread_cancel(waiter_pid);
-        libc::close(end_r);
-        libc::close(end_w);
-        Ok(ret)
+        waiter_pid = wpid;
+        if ret != 0 {
+            errno::set_errno(errno::Errno(ret));
+            err_exit("pthread_create");
+        }
     }
+    // TL&DR - select([ready_r], timeout)
+    let mut poll_fd_info = [nix::poll::PollFd::new(end_r, nix::poll::PollFlags::POLLIN)];
+    let timeout = match timeout {
+        Some(timeout) => {
+            nix::sys::time::TimeSpec::nanoseconds(timeout.subsec_nanos() as i64)
+                + nix::sys::time::TimeSpec::seconds(timeout.as_secs() as i64)
+        }
+        // TODO fix `ppoll` in nix
+        None => nix::sys::time::TimeSpec::seconds(1_000_000_000),
+    };
+    let ret = loop {
+        let poll_ret = nix::poll::ppoll(
+            &mut poll_fd_info[..],
+            timeout,
+            nix::sys::signal::SigSet::empty(),
+        );
+        let ret: Option<_> = match poll_ret {
+            Err(_) => {
+                let sys_err = nix::errno::errno();
+                if sys_err == libc::EINTR {
+                    continue;
+                }
+                crate::errors::System { code: sys_err }.fail()?
+            }
+            Ok(0) => None,
+            Ok(1) => {
+                let mut exit_code = [0; 4];
+                let read_cnt = nix::unistd::read(end_r, &mut exit_code)?;
+                assert_eq!(read_cnt, exit_code.len());
+                let exit_code = i32::from_ne_bytes(exit_code);
+                Some(exit_code as i64)
+            }
+            Ok(x) => unreachable!("unexpected return code from poll: {}", x),
+        };
+        break ret;
+    };
+
+    unsafe {
+        // SAFETY: waiter thread does not creates stack object that rely on
+        // Drop being called.
+        libc::pthread_cancel(waiter_pid);
+    }
+    nix::unistd::close(end_r)?;
+    nix::unistd::close(end_w)?;
+    Ok(ret)
 }
 
-pub(crate) unsafe fn start_zygote(
+pub(crate) fn start_zygote(
     jail_options: JailOptions,
 ) -> crate::Result<jail_common::ZygoteStartupInfo> {
-    let mut logger = crate::linux::util::strace_logger();
-    let (mut sock, js_sock) = Socket::new_socketpair().unwrap();
+    let (socket, zyg_sock) = Socket::new_socketpair().unwrap();
 
     let (return_allowed_r, return_allowed_w) = nix::unistd::pipe().expect("couldn't create pipe");
 
-    let f = libc::fork();
-    if f == -1 {
-        crate::errors::System {
-            code: errno::errno().0,
+    match nix::unistd::fork()? {
+        nix::unistd::ForkResult::Child => {
+            let sandbox_uid = nix::unistd::Uid::effective();
+            // why we use unshare(PID) here, and not in setup_namespace()? See pid_namespaces(7) and unshare(2)
+            let unshare_ns = nix::sched::CloneFlags::CLONE_NEWUSER
+                | nix::sched::CloneFlags::CLONE_NEWPID
+                | nix::sched::CloneFlags::CLONE_NEWNS
+                | nix::sched::CloneFlags::CLONE_NEWNET;
+            nix::sched::unshare(unshare_ns)?;
+            match nix::unistd::fork()? {
+                nix::unistd::ForkResult::Child => {
+                    start_zygote_main_process(jail_options, socket, zyg_sock)
+                }
+                nix::unistd::ForkResult::Parent { child } => start_zygote_initialization_helper(
+                    zyg_sock,
+                    child.as_raw(),
+                    jail_options,
+                    socket,
+                    return_allowed_w,
+                    sandbox_uid.as_raw(),
+                )
+                .map(|never| match never {}),
+            }
         }
-        .fail()?;
+        nix::unistd::ForkResult::Parent { .. } => {
+            start_zygote_caller(return_allowed_r, return_allowed_w, jail_options, socket)
+        }
     }
+}
 
-    if f != 0 {
-        // Thread A it is thread that entered start_zygote() normally, returns from function
-        write!(
-            logger,
-            "dominion {}: thread A (main)",
-            &jail_options.jail_id
-        )
-        .unwrap();
+/// Thread A it is thread that entered start_zygote() normally, returns from function
+fn start_zygote_caller(
+    return_allowed_r: Handle,
+    return_allowed_w: Handle,
+    jail_options: JailOptions,
+    socket: Socket,
+) -> crate::Result<ZygoteStartupInfo> {
+    let mut logger = crate::linux::util::strace_logger();
+    write!(
+        logger,
+        "dominion {}: thread A (main)",
+        &jail_options.jail_id
+    )
+    .unwrap();
 
-        let mut zygote_pid_bytes = [0 as u8; 4];
+    let mut zygote_pid_bytes = [0 as u8; 4];
 
-        // Wait until zygote is ready.
-        // Zygote is ready when zygote launcher returns it's pid
-        nix::unistd::read(return_allowed_r, &mut zygote_pid_bytes).expect("protocol violation");
-        nix::unistd::close(return_allowed_r).unwrap();
-        nix::unistd::close(return_allowed_w).unwrap();
-        nix::unistd::close(jail_options.watchdog_chan).unwrap();
-        let startup_info = jail_common::ZygoteStartupInfo {
-            socket: sock,
-            zygote_pid: i32::from_ne_bytes(zygote_pid_bytes),
-        };
-        return Ok(startup_info);
-    }
-    let my_euid = nix::unistd::geteuid();
-    // why we use unshare(PID) here, and not in setup_namespace()? See pid_namespaces(7) and unshare(2)
-    let unshare_ns =
-        libc::CLONE_NEWUSER | libc::CLONE_NEWPID | libc::CLONE_NEWNS | libc::CLONE_NEWNET;
-    if libc::unshare(unshare_ns) == -1 {
-        err_exit("unshare");
-    }
-    let sandbox_uid = my_euid.as_raw();
-    let fret = libc::fork();
-    if fret == -1 {
-        err_exit("fork");
-    }
-    if fret == 0 {
-        // Thread C is zygote main process
-        write!(
-            logger,
-            "dominion {}: thread C (zygote main)",
-            &jail_options.jail_id
-        )
-        .unwrap();
-        mem::drop(sock);
-        let js_arg = ZygoteOptions {
-            jail_options,
-            sock: js_sock,
-        };
-        let zygote_ret_code = main_loop::zygote_entry(js_arg);
-        libc::exit(zygote_ret_code.unwrap_or(1));
-    }
-    // Thread B is external zygote initializer.
-    // It's only task currently is to setup uid/gid mapping.
+    // Wait until zygote is ready.
+    // Zygote is ready when zygote launcher returns it's pid
+    nix::unistd::read(return_allowed_r, &mut zygote_pid_bytes).expect("protocol violation");
+    nix::unistd::close(return_allowed_r).unwrap();
+    nix::unistd::close(return_allowed_w).unwrap();
+    nix::unistd::close(jail_options.watchdog_chan).unwrap();
+    let startup_info = jail_common::ZygoteStartupInfo {
+        socket,
+        zygote_pid: i32::from_ne_bytes(zygote_pid_bytes),
+    };
+    Ok(startup_info)
+}
+
+/// Thread B is zygote initialization helper, external to sandbox.
+fn start_zygote_initialization_helper(
+    zyg_sock: Socket,
+    child_pid: Pid,
+    jail_options: JailOptions,
+    mut socket: Socket,
+    return_allowed_w: Handle,
+    sandbox_uid: u32,
+) -> Result<std::convert::Infallible, crate::Error> {
+    let mut logger = crate::linux::util::strace_logger();
     write!(
         logger,
         "dominion {}: thread B (zygote launcher)",
         &jail_options.jail_id
     )
     .unwrap();
-    mem::drop(js_sock);
-    let child_pid = fret as Pid;
+    mem::drop(zyg_sock);
+
+    // currently our only task is to setup uid/gid mapping.
+
     // map sandbox uid: internal to external.
     let mapping = format!("{} {} 1", SANDBOX_INTERNAL_UID, sandbox_uid);
     let uid_map_path = format!("/proc/{}/uid_map", child_pid);
     let gid_map_path = format!("/proc/{}/gid_map", child_pid);
     let setgroups_path = format!("/proc/{}/setgroups", child_pid);
-    sock.lock(WM_CLASS_PID_MAP_READY_FOR_SETUP)?;
+    socket.lock(WM_CLASS_PID_MAP_READY_FOR_SETUP)?;
     fs::write(setgroups_path, "deny").unwrap();
     fs::write(&uid_map_path, mapping.as_str()).unwrap();
     fs::write(&gid_map_path, mapping.as_str()).unwrap();
-    sock.wake(WM_CLASS_PID_MAP_CREATED)?;
-    sock.lock(WM_CLASS_SETUP_FINISHED)?;
+    socket.wake(WM_CLASS_PID_MAP_CREATED)?;
+    socket.lock(WM_CLASS_SETUP_FINISHED)?;
     // And now thread A can return.
     nix::unistd::write(return_allowed_w, &child_pid.to_ne_bytes()).expect("protocol violation");
-    libc::exit(0);
+    unsafe {
+        libc::exit(0);
+    }
+}
+
+/// Thread C is zygote main process
+fn start_zygote_main_process(jail_options: JailOptions, socket: Socket, zyg_sock: Socket) -> ! {
+    let mut logger = crate::linux::util::strace_logger();
+    write!(
+        logger,
+        "dominion {}: thread C (zygote main)",
+        &jail_options.jail_id
+    )
+    .unwrap();
+    mem::drop(socket);
+    let zyg_opts = ZygoteOptions {
+        jail_options,
+        sock: zyg_sock,
+    };
+    let zygote_ret_code = main_loop::zygote_entry(zyg_opts);
+    unsafe {
+        libc::exit(zygote_ret_code.unwrap_or(1));
+    }
 }

@@ -7,6 +7,7 @@ use std::{
 use tiny_nix_ipc::{self, Socket};
 
 pub type Handle = RawFd;
+
 pub type Pid = libc::pid_t;
 pub type ExitCode = i64;
 pub type Uid = libc::uid_t;
@@ -27,7 +28,7 @@ pub fn err_exit(syscall_name: &str) -> ! {
     }
 }
 
-unsafe fn sock_lock(sock: &mut Socket, expected_class: &'static [u8]) -> crate::Result<()> {
+fn sock_lock(sock: &mut Socket, expected_class: &'static [u8]) -> crate::Result<()> {
     use std::io::Write;
     let mut logger = strace_logger();
     let mut recv_buf = vec![0; expected_class.len()];
@@ -51,7 +52,7 @@ unsafe fn sock_lock(sock: &mut Socket, expected_class: &'static [u8]) -> crate::
     Ok(())
 }
 
-unsafe fn sock_wake(sock: &mut Socket, wake_class: &'static [u8]) -> crate::Result<()> {
+fn sock_wake(sock: &mut Socket, wake_class: &'static [u8]) -> crate::Result<()> {
     match sock.send_slice(&wake_class, None) {
         Ok(_) => Ok(()),
         Err(_) => Err(crate::Error::Sandbox),
@@ -59,25 +60,25 @@ unsafe fn sock_wake(sock: &mut Socket, wake_class: &'static [u8]) -> crate::Resu
 }
 
 pub trait IpcSocketExt {
-    unsafe fn lock(&mut self, expected_class: &'static [u8]) -> crate::Result<()>;
-    unsafe fn wake(&mut self, wake_class: &'static [u8]) -> crate::Result<()>;
+    fn lock(&mut self, expected_class: &'static [u8]) -> crate::Result<()>;
+    fn wake(&mut self, wake_class: &'static [u8]) -> crate::Result<()>;
 
-    unsafe fn send<T: serde::ser::Serialize>(&mut self, data: &T) -> crate::Result<()>;
-    unsafe fn recv<T: serde::de::DeserializeOwned>(&mut self) -> crate::Result<T>;
+    fn send<T: serde::ser::Serialize>(&mut self, data: &T) -> crate::Result<()>;
+    fn recv<T: serde::de::DeserializeOwned>(&mut self) -> crate::Result<T>;
 }
 
 const MAX_MSG_SIZE: usize = 16384;
 
 impl IpcSocketExt for Socket {
-    unsafe fn lock(&mut self, expected_class: &'static [u8]) -> crate::Result<()> {
+    fn lock(&mut self, expected_class: &'static [u8]) -> crate::Result<()> {
         sock_lock(self, expected_class)
     }
 
-    unsafe fn wake(&mut self, wake_class: &'static [u8]) -> crate::Result<()> {
+    fn wake(&mut self, wake_class: &'static [u8]) -> crate::Result<()> {
         sock_wake(self, wake_class)
     }
 
-    unsafe fn send<T: serde::ser::Serialize>(&mut self, data: &T) -> crate::Result<()> {
+    fn send<T: serde::ser::Serialize>(&mut self, data: &T) -> crate::Result<()> {
         let data = serde_json::to_vec(data).unwrap();
         assert!(data.len() <= MAX_MSG_SIZE);
         self.send_slice(&data, None)
@@ -85,7 +86,7 @@ impl IpcSocketExt for Socket {
             .map_err(|_e| crate::errors::Error::Sandbox)
     }
 
-    unsafe fn recv<T: serde::de::DeserializeOwned>(&mut self) -> crate::Result<T> {
+    fn recv<T: serde::de::DeserializeOwned>(&mut self) -> crate::Result<T> {
         use std::io::Write;
         let mut logger = StraceLogger::new();
         let mut buf = vec![0; MAX_MSG_SIZE];
