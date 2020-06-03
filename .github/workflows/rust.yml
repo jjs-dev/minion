@@ -1,0 +1,33 @@
+name: Rust
+
+on:
+  push:
+    branches: 
+      - master
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTC_BOOTSTRAP: 1
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1.0.6
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions-rs/toolchain@v1.0.6
+      with:
+        toolchain: stable
+        components: clippy
+    - name: Run clippy
+      run: cargo clippy --workspace -- -Dclippy::all

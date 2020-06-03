@@ -69,7 +69,11 @@ fn find_lca<'a>(a: &'a [String], b: &'a [String]) -> &'a [String] {
             return &a[..i];
         }
     }
-    if n1 < n2 { a } else { b }
+    if n1 < n2 {
+        a
+    } else {
+        b
+    }
 }
 
 /// `crate::check()` on linux
