@@ -225,7 +225,6 @@ name = "minion"
 version = "0.1.0"
 dependencies = [
  "backtrace",
- "cfg-if",
  "errno",
  "libc 0.2.71 (registry+https://github.com/rust-lang/crates.io-index)",
  "nix 0.17.0",
