@@ -33,6 +33,19 @@ jobs:
         run: |
           rm -rf .cargo
           cargo clippy --workspace -- -Dclippy::all
+  check-platform-support:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1.0.6
+        with:
+          toolchain: stable
+      - name: Remove cargo config
+        run: rm -rf .cargo
+      - name: Check musl
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          cargo check --workspace --target x86_64-unknown-linux-musl
   tests:
     runs-on: ubuntu-latest
     steps:
