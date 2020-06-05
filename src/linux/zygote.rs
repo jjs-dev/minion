@@ -303,17 +303,15 @@ fn timed_wait(pid: Pid, timeout: Option<time::Duration>) -> crate::Result<Option
         end_r = 0;
         end_w = 0;
         setup_pipe(&mut end_r, &mut end_w)?;
-        let waiter_pid;
+        let mut waiter_pid: libc::pthread_t = unsafe { std::mem::zeroed() };
         {
             let mut arg = WaiterArg { res_fd: end_w, pid };
-            let mut wpid = 0;
             let ret = libc::pthread_create(
-                &mut wpid as *mut _,
+                &mut waiter_pid as *mut _,
                 ptr::null(),
                 timed_wait_waiter,
                 &mut arg as *mut WaiterArg as *mut c_void,
             );
-            waiter_pid = wpid;
             if ret != 0 {
                 errno::set_errno(errno::Errno(ret));
                 err_exit("pthread_create");
