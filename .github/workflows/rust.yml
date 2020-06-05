@@ -32,7 +32,7 @@ jobs:
       - name: Run clippy
         run: |
           rm -rf .cargo
-          cargo clippy --workspace -- -Dclippy::all
+          cargo clippy -p minion -p minion-ffi -- -Dclippy::all
   check-platform-support:
     runs-on: ubuntu-latest
     steps:
@@ -45,27 +45,25 @@ jobs:
       - name: Check musl
         run: |
           rustup target add x86_64-unknown-linux-musl
-          cargo check --workspace --target x86_64-unknown-linux-musl
+          cargo check -p minion -p minion-ffi --target x86_64-unknown-linux-musl
   tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1.0.6
         with: 
-          toolchain: stable
+          toolchain: nightly
+          override: true
       - name: Compile tests
         run: |
           rm -rf .cargo
-          mkdir build
-          cd build
-          cmake ../minion-ffi/tests
-          cmake --build .
+          cd minion-tests 
+          TARGET=x86_64-unknown-linux-musl
+          rustup target add $TARGET
+          cargo build -Zunstable-options --out-dir=../out --target=$TARGET
       - name: Run tests
         run: |
-          cd build
-          
-          # TODO
-          # sudo ./mft
+          sudo ./out/minion-tests
   nightly-checks:
     runs-on: ubuntu-latest
     steps:

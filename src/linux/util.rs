@@ -1,4 +1,4 @@
-use libc::{self, c_char, c_int, c_void};
+use libc::{self, c_char, c_void};
 use std::{
     ffi::{CString, OsStr},
     io,
@@ -8,7 +8,7 @@ use tiny_nix_ipc::{self, Socket};
 
 pub type Handle = RawFd;
 pub type Pid = libc::pid_t;
-pub type ExitCode = c_int;
+pub type ExitCode = i64;
 pub type Uid = libc::uid_t;
 
 pub fn get_last_error() -> i32 {

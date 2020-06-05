@@ -75,16 +75,14 @@ pub(crate) enum Query {
 }
 
 pub(crate) fn dominion_kill_all(zygote_pid: Pid, jail_id: Option<&str>) -> std::io::Result<()> {
-    // We will send SIGTERM to zygote, and
+    // We will kill zygote, and
     // kernel will kill all other processes by itself.
-    unsafe {
-        if libc::kill(zygote_pid, libc::SIGTERM) != 0 {
-            eprintln!("warn: SIGTERM not delevered");
-        }
-        if libc::kill(zygote_pid, libc::SIGABRT) != 0 {
-            eprintln!("warn: SIGABRT not delivered");
-        }
-    }
+    let send_sig = |signal| {
+        nix::sys::signal::kill(nix::unistd::Pid::from_raw(zygote_pid), signal).ok();
+    };
+    send_sig(nix::sys::signal::SIGKILL);
+    send_sig(nix::sys::signal::SIGTERM);
+    send_sig(nix::sys::signal::SIGABRT);
     let jail_id = match jail_id {
         Some(j) => j,
         None => return Ok(()),

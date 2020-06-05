@@ -227,19 +227,21 @@ unsafe fn cpu_time_observer(
             continue;
         }
         if was_cpu_tle {
-            eprintln!("CPU time limit exceeded");
+            writeln!(logger, "minion-watchdog: CPU time limit exceeded").unwrap();
             nix::unistd::write(chan, b"c").ok();
         } else if was_real_tle {
-            eprintln!(
-                "Real time limit exceeded: limit {}, used {}",
+            writeln!(
+                logger,
+                "minion-watchdog: Real time limit exceeded: limit {}ns, used {}ns",
                 real_time_limit, elapsed
-            );
+            )
+            .unwrap();
             nix::unistd::write(chan, b"r").ok();
         }
         // since we are inside pid ns, we can refer to zygote as pid1.
         let err = jail_common::dominion_kill_all(1 as Pid, None);
         if let Err(err) = err {
-            eprintln!("failed to kill dominion {:?}", err);
+            eprintln!("minion-watchdog: failed to kill dominion {}", err);
         }
         // we will be killed by kernel too
     }

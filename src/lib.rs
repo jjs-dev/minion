@@ -351,6 +351,9 @@ use std::{
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// May be returned when process was killed
+pub const EXIT_CODE_KILLED: i64 = 0x7eaddeadbeeff00d;
+
 /// Returned by [ChildProcess::wait_for_exit]
 ///
 /// [ChildProcess::wait_fot_exit]: trait.ChildProcess.html#tymethod.wait_for_exit

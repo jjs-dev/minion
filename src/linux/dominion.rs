@@ -215,8 +215,8 @@ impl LinuxDominion {
         let q = jail_common::Query::Poll(jail_common::PollQuery { pid, timeout });
         self.zygote_sock.lock().unwrap().send(&q).ok();
         match self.zygote_sock.lock().unwrap().recv::<Option<i32>>() {
-            Ok(x) => x,
-            Err(_) => None,
+            Ok(x) => x.map(Into::into),
+            Err(_) => Some(crate::EXIT_CODE_KILLED),
         }
     }
 }

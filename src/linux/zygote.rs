@@ -41,6 +41,12 @@ impl Stdio {
             stderr: fds[2],
         }
     }
+
+    fn close_fds(self) {
+        nix::unistd::close(self.stdin).ok();
+        nix::unistd::close(self.stdout).ok();
+        nix::unistd::close(self.stderr).ok();
+    }
 }
 
 struct JobOptions {
@@ -254,6 +260,7 @@ unsafe fn spawn_job(
         do_exec(dea);
     }
     // Parent
+    dea.stdio.close_fds();
     child_pid = res;
 
     // Now we can allow child to execve()
@@ -303,7 +310,7 @@ fn timed_wait(pid: Pid, timeout: Option<time::Duration>) -> crate::Result<Option
         end_r = 0;
         end_w = 0;
         setup_pipe(&mut end_r, &mut end_w)?;
-        let mut waiter_pid: libc::pthread_t = unsafe { std::mem::zeroed() };
+        let mut waiter_pid: libc::pthread_t = std::mem::zeroed();
         {
             let mut arg = WaiterArg { res_fd: end_w, pid };
             let ret = libc::pthread_create(
