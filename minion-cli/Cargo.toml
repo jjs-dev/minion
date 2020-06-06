@@ -1,0 +1,10 @@
+[package]
+name = "minion-cli"
+version = "0.1.0"
+authors = ["Mikail Bagishov <bagishov.mikail@yandex.ru>"]
+edition = "2018"
+
+[dependencies]
+minion = {path = ".."}
+structopt = "0.3.13"
+libc = "0.2.68"
