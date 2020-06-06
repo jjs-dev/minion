@@ -1,6 +1,6 @@
 use crate::linux::{
     jail_common::{get_path_for_cgroup_legacy_subsystem, JailOptions},
-    util::{err_exit, Handle, Pid},
+    util::Handle,
 };
 use std::{
     fs,
@@ -8,6 +8,7 @@ use std::{
     path::PathBuf,
     sync::atomic::{AtomicU8, AtomicUsize, Ordering},
 };
+
 #[derive(Clone)]
 enum GroupHandles {
     // For cgroups V1, we store handles of `tasks` file in each hierarchy.
@@ -107,7 +108,7 @@ pub(crate) fn get_path_for_cgroup_unified(cgroup_id: &str) -> PathBuf {
     get_cgroup_prefix().join(format!("sandbox.{}", cgroup_id))
 }
 
-unsafe fn setup_chroups_legacy(jail_options: &JailOptions) -> Vec<Handle> {
+fn setup_chroups_legacy(jail_options: &JailOptions) -> Vec<Handle> {
     let jail_id = &jail_options.jail_id;
     // configure cpuacct subsystem
     let cpuacct_cgroup_path = get_path_for_cgroup_legacy_subsystem("cpuacct", &jail_id);
@@ -135,11 +136,6 @@ unsafe fn setup_chroups_legacy(jail_options: &JailOptions) -> Vec<Handle> {
     )
     .expect("failed to enable memory limiy");
 
-    let my_pid: Pid = libc::getpid();
-    if my_pid == -1 {
-        err_exit("getpid");
-    }
-
     // we return handles to tasksfiles for main cgroups
     // so, though zygote itself and children are in chroot, and cannot access cgroupfs, they will be able to add themselves to cgroups
     ["cpuacct", "memory", "pids"]
@@ -152,12 +148,12 @@ unsafe fn setup_chroups_legacy(jail_options: &JailOptions) -> Vec<Handle> {
                 .open(&p)
                 .unwrap_or_else(|err| panic!("Couldn't open tasks file {}: {}", p.display(), err))
                 .into_raw_fd();
-            libc::dup(h)
+            nix::unistd::dup(h).expect("dup failed")
         })
         .collect::<Vec<_>>()
 }
 
-unsafe fn setup_cgroups_v2(jail_options: &JailOptions) -> Handle {
+fn setup_cgroups_v2(jail_options: &JailOptions) -> Handle {
     let jail_id = &jail_options.jail_id;
     let cgroup_path = get_path_for_cgroup_unified(jail_id);
     fs::create_dir_all(&cgroup_path).expect("failed to create cgroup");
@@ -191,10 +187,10 @@ unsafe fn setup_cgroups_v2(jail_options: &JailOptions) -> Handle {
                 err
             )
         });
-    libc::dup(h.into_raw_fd())
+    nix::unistd::dup(h.into_raw_fd()).expect("dup failed")
 }
 
-pub(super) unsafe fn setup_cgroups(jail_options: &JailOptions) -> Group {
+pub(super) fn setup_cgroups(jail_options: &JailOptions) -> Group {
     let handles = match detect_cgroup_version() {
         CgroupVersion::V1 => GroupHandles::V1(setup_chroups_legacy(jail_options)),
         CgroupVersion::V2 => GroupHandles::V2(setup_cgroups_v2(jail_options)),

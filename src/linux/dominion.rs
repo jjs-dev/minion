@@ -2,7 +2,7 @@ use crate::{
     linux::{
         jail_common,
         pipe::setup_pipe,
-        util::{err_exit, ExitCode, Handle, IpcSocketExt, Pid},
+        util::{ExitCode, Handle, IpcSocketExt, Pid},
         zygote,
     },
     Dominion, DominionOptions,
@@ -164,9 +164,11 @@ impl LinuxDominion {
         let mut read_end = 0;
         let mut write_end = 0;
         setup_pipe(&mut read_end, &mut write_end)?;
-        if -1 == libc::fcntl(read_end, libc::F_SETFL, libc::O_NONBLOCK) {
-            err_exit("fcntl");
-        }
+        nix::fcntl::fcntl(
+            read_end,
+            nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
+        )?;
+
         let jail_options = jail_common::JailOptions {
             max_alive_process_count: options.max_alive_process_count,
             memory_limit: options.memory_limit,

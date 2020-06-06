@@ -40,9 +40,11 @@ pub enum WaitOutcome {
     Timeout,
 }
 
+/// # Safety
+/// `buf` must be valid, readable pointer
 unsafe fn get_string(buf: *const c_char) -> OsString {
     use std::os::unix::ffi::OsStrExt;
-    let buf = CStr::from_ptr(buf);
+    let buf = unsafe { CStr::from_ptr(buf) };
     let buf = buf.to_bytes();
     let s = OsStr::from_bytes(buf);
     s.to_os_string()
@@ -79,7 +81,7 @@ pub extern "C" fn minion_backend_create(out: &mut *mut Backend) -> ErrorCode {
 #[no_mangle]
 #[must_use]
 pub unsafe extern "C" fn minion_backend_free(b: *mut Backend) -> ErrorCode {
-    let b = Box::from_raw(b);
+    let b = unsafe { Box::from_raw(b) };
     mem::drop(b);
     ErrorCode::Ok
 }
@@ -112,7 +114,9 @@ pub unsafe extern "C" fn minion_dominion_check_cpu_tle(
 ) -> ErrorCode {
     match dominion.0.check_cpu_tle() {
         Ok(st) => {
-            out.write(st);
+            unsafe {
+                out.write(st);
+            }
             ErrorCode::Ok
         }
         Err(_) => ErrorCode::Unknown,
@@ -128,7 +132,9 @@ pub unsafe extern "C" fn minion_dominion_check_real_tle(
 ) -> ErrorCode {
     match dominion.0.check_real_tle() {
         Ok(st) => {
-            out.write(st);
+            unsafe {
+                out.write(st);
+            }
             ErrorCode::Ok
         }
         Err(_) => ErrorCode::Unknown,
@@ -153,7 +159,7 @@ pub unsafe extern "C" fn minion_dominion_create(
     out: &mut *mut Dominion,
 ) -> ErrorCode {
     let mut exposed_paths = Vec::new();
-    {
+    unsafe {
         let mut p = options.shared_directories;
         while !(*p).host_path.is_null() {
             let opt = minion::PathExpositionOptions {
@@ -168,6 +174,7 @@ pub unsafe extern "C" fn minion_dominion_create(
             p = p.offset(1);
         }
     }
+    let isolation_root = unsafe { get_string(options.isolation_root) }.into();
     let opts = minion::DominionOptions {
         max_alive_process_count: options.process_limit as _,
         memory_limit: u64::from(options.memory_limit),
@@ -179,7 +186,7 @@ pub unsafe extern "C" fn minion_dominion_create(
             options.real_time_limit.seconds.into(),
             options.real_time_limit.nanoseconds,
         ),
-        isolation_root: get_string(options.isolation_root).into(),
+        isolation_root,
         exposed_paths,
     };
     let d = backend.0.new_dominion(opts);
@@ -195,7 +202,7 @@ pub unsafe extern "C" fn minion_dominion_create(
 #[no_mangle]
 #[must_use]
 pub unsafe extern "C" fn minion_dominion_free(dominion: *mut Dominion) -> ErrorCode {
-    let b = Box::from_raw(dominion);
+    let b = unsafe { Box::from_raw(dominion) };
     mem::drop(b);
     ErrorCode::Ok
 }
@@ -274,7 +281,7 @@ pub unsafe extern "C" fn minion_cp_spawn(
     out: &mut *mut ChildProcess,
 ) -> ErrorCode {
     let mut arguments = Vec::new();
-    {
+    unsafe {
         let mut p = options.argv;
         while !(*p).is_null() {
             arguments.push(get_string(*p));
@@ -282,7 +289,7 @@ pub unsafe extern "C" fn minion_cp_spawn(
         }
     }
     let mut environment = Vec::new();
-    {
+    unsafe {
         let mut p = options.envp;
         while !(*p).name.is_null() {
             let name = get_string((*p).name);
@@ -295,18 +302,22 @@ pub unsafe extern "C" fn minion_cp_spawn(
             p = p.offset(1);
         }
     }
-    let stdio = minion::StdioSpecification {
-        stdin: minion::InputSpecification::handle(options.stdio.stdin),
-        stdout: minion::OutputSpecification::handle(options.stdio.stdout),
-        stderr: minion::OutputSpecification::handle(options.stdio.stderr),
+    let stdio = unsafe {
+        minion::StdioSpecification {
+            stdin: minion::InputSpecification::handle(options.stdio.stdin),
+            stdout: minion::OutputSpecification::handle(options.stdio.stdout),
+            stderr: minion::OutputSpecification::handle(options.stdio.stderr),
+        }
     };
-    let options = minion::ChildProcessOptions {
-        path: get_string(options.image_path).into(),
-        arguments,
-        environment,
-        dominion: (*options.dominion).0.clone(),
-        stdio,
-        pwd: get_string(options.workdir).into(),
+    let options = unsafe {
+        minion::ChildProcessOptions {
+            path: get_string(options.image_path).into(),
+            arguments,
+            environment,
+            dominion: (*options.dominion).0.clone(),
+            stdio,
+            pwd: get_string(options.workdir).into(),
+        }
     };
     let cp = backend.0.spawn(options).unwrap();
     let cp = ChildProcess(cp);
@@ -336,7 +347,9 @@ pub unsafe extern "C" fn minion_cp_wait(
                 minion::WaitOutcome::AlreadyFinished => WaitOutcome::AlreadyFinished,
                 minion::WaitOutcome::Timeout => WaitOutcome::Timeout,
             };
-            out.write(outcome);
+            unsafe {
+                out.write(outcome);
+            }
             ErrorCode::Ok
         }
         Result::Err(_) => ErrorCode::Unknown,
@@ -346,24 +359,33 @@ pub unsafe extern "C" fn minion_cp_wait(
 #[no_mangle]
 pub static EXIT_CODE_STILL_RUNNING: i64 = 1234_4321;
 
+/// Returns child process (pointed by `cp`) exit code.
+///
+/// `out` will contain exit code. If child is still running,
+/// `out` will not be written to.
+///
+/// if `finish_flag` is non-null it will be written 0/1 flag:
+/// has child finished.
 /// # Safety
 /// Provided pointers must be valid
 #[no_mangle]
 #[must_use]
 pub unsafe extern "C" fn minion_cp_exitcode(
-    cp: &mut ChildProcess,
+    cp: &ChildProcess,
     out: *mut i64,
-    finish_flag: *mut bool,
+    finish_flag: *mut u8,
 ) -> ErrorCode {
     match cp.0.get_exit_code() {
         Result::Ok(exit_code) => {
             if let Some(code) = exit_code {
-                out.write(code);
+                unsafe {
+                    out.write(code);
+                }
             } else {
-                out.write(EXIT_CODE_STILL_RUNNING)
+                unsafe { out.write(EXIT_CODE_STILL_RUNNING) }
             }
             if !finish_flag.is_null() {
-                finish_flag.write(exit_code.is_some());
+                unsafe { finish_flag.write(exit_code.is_some() as u8) };
             }
             ErrorCode::Ok
         }
@@ -376,6 +398,6 @@ pub unsafe extern "C" fn minion_cp_exitcode(
 #[no_mangle]
 #[must_use]
 pub unsafe extern "C" fn minion_cp_free(cp: *mut ChildProcess) -> ErrorCode {
-    mem::drop(Box::from_raw(cp));
+    mem::drop(unsafe { Box::from_raw(cp) });
     ErrorCode::Ok
 }

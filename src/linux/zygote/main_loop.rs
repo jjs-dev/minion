@@ -5,7 +5,7 @@ use crate::linux::{
 };
 use std::{io::Write, time::Duration};
 
-unsafe fn process_spawn_query(
+fn process_spawn_query(
     arg: &mut ZygoteOptions,
     options: &JobQuery,
     setup_data: &SetupData,
@@ -44,7 +44,7 @@ unsafe fn process_spawn_query(
     Ok(())
 }
 
-unsafe fn process_poll_query(
+fn process_poll_query(
     arg: &mut ZygoteOptions,
     pid: Pid,
     timeout: Option<Duration>,
@@ -53,8 +53,10 @@ unsafe fn process_poll_query(
     arg.sock.send(&res)?;
     Ok(())
 }
+const RETURN_CODE_OK: i32 = 0;
+const RETURN_CODE_BAD_QUERY: i32 = 1;
 
-pub(crate) unsafe fn zygote_entry(mut arg: ZygoteOptions) -> crate::Result<i32> {
+pub(crate) fn zygote_entry(mut arg: ZygoteOptions) -> crate::Result<i32> {
     let setup_data = setup::setup(&arg.jail_options, &mut arg.sock)?;
 
     let mut logger = StraceLogger::new();
@@ -66,7 +68,7 @@ pub(crate) unsafe fn zygote_entry(mut arg: ZygoteOptions) -> crate::Result<i32> 
             }
             Err(err) => {
                 writeln!(logger, "zygote: got unprocessable query: {}", err).ok();
-                return Ok(23);
+                return Ok(RETURN_CODE_BAD_QUERY);
             }
         };
         match query {
@@ -75,5 +77,5 @@ pub(crate) unsafe fn zygote_entry(mut arg: ZygoteOptions) -> crate::Result<i32> 
             Query::Poll(p) => process_poll_query(&mut arg, p.pid, p.timeout)?,
         };
     }
-    Ok(0)
+    Ok(RETURN_CODE_OK)
 }

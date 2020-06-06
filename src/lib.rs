@@ -213,7 +213,7 @@ impl InputSpecification {
     /// # Safety
     /// See requirements of `handle`
     pub unsafe fn handle_of<T: std::os::unix::io::IntoRawFd>(obj: T) -> Self {
-        Self::handle(obj.into_raw_fd() as u64)
+        unsafe { Self::handle(obj.into_raw_fd() as u64) }
     }
 }
 
@@ -258,7 +258,7 @@ impl OutputSpecification {
     /// # Safety
     /// See requirements of `handle`
     pub unsafe fn handle_of<T: std::os::unix::io::IntoRawFd>(obj: T) -> Self {
-        Self::handle(obj.into_raw_fd() as u64)
+        unsafe { Self::handle(obj.into_raw_fd() as u64) }
     }
 }
 
