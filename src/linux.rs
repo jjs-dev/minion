@@ -83,7 +83,7 @@ impl ChildProcess for LinuxChildProcess {
         match wait_result {
             None => Ok(WaitOutcome::Timeout),
             Some(w) => {
-                self.exit_code.store(i64::from(w), Ordering::SeqCst);
+                self.exit_code.store(w, Ordering::SeqCst);
                 Ok(WaitOutcome::Exited)
             }
         }

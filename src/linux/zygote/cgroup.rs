@@ -104,9 +104,7 @@ pub(crate) fn get_cgroup_prefix() -> &'static PathBuf {
 }
 
 pub(crate) fn get_path_for_cgroup_unified(cgroup_id: &str) -> PathBuf {
-    get_cgroup_prefix()
-        .join("jjs")
-        .join(format!("sandbox.{}", cgroup_id))
+    get_cgroup_prefix().join(format!("sandbox.{}", cgroup_id))
 }
 
 unsafe fn setup_chroups_legacy(jail_options: &JailOptions) -> Vec<Handle> {

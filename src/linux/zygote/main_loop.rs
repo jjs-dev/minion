@@ -22,7 +22,10 @@ unsafe fn process_spawn_query(
         .1
         .unwrap();
     for f in child_fds.iter_mut() {
-        *f = nix::unistd::dup(*f).unwrap();
+        let old = *f;
+        let new = nix::unistd::dup(old).unwrap();
+        nix::unistd::close(old).unwrap();
+        *f = new;
     }
     let child_stdio = Stdio::from_fd_array(child_fds);
 
