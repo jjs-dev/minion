@@ -32,7 +32,7 @@ jobs:
       - name: Run clippy
         run: |
           rm -rf .cargo
-          cargo clippy -p minion -p minion-ffi -- -Dclippy::all
+          cargo clippy -p minion -p minion-ffi -p minion-cli -- -Dclippy::all
   check-platform-support:
     runs-on: ubuntu-latest
     steps:
@@ -45,7 +45,7 @@ jobs:
       - name: Check musl
         run: |
           rustup target add x86_64-unknown-linux-musl
-          cargo check -p minion -p minion-ffi --target x86_64-unknown-linux-musl
+          cargo check -p minion -p minion-ffi -p minion-cli --target x86_64-unknown-linux-musl
   tests:
     runs-on: ubuntu-latest
     steps:
