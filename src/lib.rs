@@ -287,8 +287,6 @@ pub struct ChildProcessOptions {
 }
 
 mod errors {
-    use snafu::Snafu;
-
     #[derive(Eq, PartialEq)]
     pub enum ErrorKind {
         /// This error typically means that isolated process tried to break its sandbox
@@ -297,18 +295,21 @@ mod errors {
         System,
     }
 
-    #[derive(Debug, Snafu)]
-    #[snafu(visibility(pub))]
+    #[derive(Debug, thiserror::Error)]
+    #[non_exhaustive]
     pub enum Error {
-        #[snafu(display("requested operation is not supported by backend"))]
+        #[error("requested operation is not supported by backend")]
         NotSupported,
-        #[snafu(display("system call failed in undesired fashion (error code {})", code))]
-        System { code: i32 },
-        #[snafu(display("io error"))]
-        Io { source: std::io::Error },
-        #[snafu(display("sandbox interaction failed"))]
+        #[error("system call failed in undesired fashion (error code {})", code)]
+        Syscall { code: i32 },
+        #[error("io error")]
+        Io {
+            #[from]
+            source: std::io::Error,
+        },
+        #[error("sandbox interaction failed")]
         Sandbox,
-        #[snafu(display("unknown error"))]
+        #[error("unknown error")]
         Unknown,
     }
 
@@ -316,7 +317,7 @@ mod errors {
         pub fn kind(&self) -> ErrorKind {
             match self {
                 Error::NotSupported => ErrorKind::System,
-                Error::System { .. } => ErrorKind::System,
+                Error::Syscall { .. } => ErrorKind::System,
                 Error::Io { .. } => ErrorKind::System,
                 Error::Sandbox => ErrorKind::Sandbox,
                 Error::Unknown => ErrorKind::System,
@@ -335,7 +336,7 @@ mod errors {
     impl From<nix::Error> for Error {
         fn from(err: nix::Error) -> Self {
             if let Some(errno) = err.as_errno() {
-                Error::System { code: errno as i32 }
+                Error::Syscall { code: errno as i32 }
             } else {
                 Error::Unknown
             }

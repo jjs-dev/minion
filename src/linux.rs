@@ -16,7 +16,6 @@ use crate::{
     InputSpecificationData, OutputSpecification, OutputSpecificationData, WaitOutcome,
 };
 use nix::sys::memfd;
-use snafu::ResultExt;
 use std::{
     ffi::CString,
     fs,
@@ -115,7 +114,7 @@ fn handle_input_io(spec: InputSpecification) -> crate::Result<(Option<Handle>, H
             Ok((None, h))
         }
         InputSpecificationData::Empty => {
-            let file = fs::File::create("/dev/null").context(crate::errors::Io)?;
+            let file = fs::File::create("/dev/null")?;
             let file = file.into_raw_fd();
             Ok((None, file))
         }
@@ -136,7 +135,7 @@ fn handle_output_io(spec: OutputSpecification) -> crate::Result<(Option<Handle>,
             Ok((Some(h_read), f))
         }
         OutputSpecificationData::Ignore => {
-            let file = fs::File::open("/dev/null").context(crate::errors::Io)?;
+            let file = fs::File::open("/dev/null")?;
             let file = file.into_raw_fd();
             let fd = unsafe { libc::dup(file) };
             Ok((None, fd))
@@ -151,10 +150,9 @@ fn handle_output_io(spec: OutputSpecification) -> crate::Result<(Option<Handle>,
             let mfd = memfd::memfd_create(&memfd_name, flags).unwrap();
             if let Some(sz) = sz {
                 if unsafe { libc::ftruncate(mfd, sz as i64) } == -1 {
-                    crate::errors::System {
+                    return Err(crate::Error::Syscall {
                         code: get_last_error(),
-                    }
-                    .fail()?
+                    });
                 }
             }
             let child_fd = unsafe { libc::dup(mfd) };
