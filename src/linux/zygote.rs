@@ -344,7 +344,7 @@ fn timed_wait(pid: Pid, timeout: Option<time::Duration>) -> crate::Result<Option
                 if sys_err == libc::EINTR {
                     continue;
                 }
-                crate::errors::System { code: sys_err }.fail()?
+                return Err(crate::Error::Syscall { code: sys_err });
             }
             Ok(0) => None,
             Ok(1) => {
