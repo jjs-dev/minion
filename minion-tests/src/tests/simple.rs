@@ -1,6 +1,5 @@
 //! Tests that simple program that does nothing completes successfully.
 use minion::ChildProcess;
-use minion::Dominion;
 
 pub(crate) struct TOk;
 impl crate::TestCase for TOk {
@@ -126,7 +125,7 @@ impl crate::TestCase for TOom {
         }
     }
 
-    fn check(&self, cp: &mut dyn ChildProcess, d: minion::DominionRef) {
+    fn check(&self, _cp: &mut dyn ChildProcess, _d: minion::DominionRef) {
         // TODO this test is broken
         // super::assert_exit_code(cp, -9);
         // assert!(!d.check_cpu_tle().unwrap());
@@ -165,7 +164,7 @@ impl crate::TestCase for TSecurity {
         assert!(matches!(err, nix::Error::Sys(nix::errno::Errno::EPERM)));
         std::process::exit(24)
     }
-    fn check(&self, cp: &mut dyn minion::ChildProcess, d: minion::DominionRef) {
+    fn check(&self, cp: &mut dyn minion::ChildProcess, _d: minion::DominionRef) {
         super::assert_exit_code(cp, 24);
         super::assert_empty(&mut cp.stdout().unwrap());
         super::assert_empty(&mut cp.stderr().unwrap());
