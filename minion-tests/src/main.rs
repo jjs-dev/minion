@@ -8,7 +8,7 @@
 //! master. Finally, test itself is executed inside another process.
 //! I.e.
 //! Master: parses CLI, selects tests, spawns Workers
-//! Worker: sets up dominion, executes `minion-tests` in Test mode.
+//! Worker: sets up sandbox, executes `minion-tests` in Test mode.
 //! Test: just executes test selected by name
 #![feature(asm, test)]
 mod master;
@@ -27,7 +27,7 @@ pub trait TestCase: Send + Sync {
     /// If tests passed, does nothing otherwise
     /// panics.
     /// Executed on worker.
-    fn check(&self, cp: &mut dyn minion::ChildProcess, d: minion::DominionRef);
+    fn check(&self, cp: &mut dyn minion::erased::ChildProcess, sb: &dyn minion::erased::Sandbox);
     /// Overrides CPU time limit
     fn time_limit(&self) -> std::time::Duration {
         std::time::Duration::from_secs(1)

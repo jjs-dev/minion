@@ -14,20 +14,20 @@ pub fn main(test_cases: &[&'static dyn TestCase]) {
         .unwrap();
 
     let tempdir = tempfile::TempDir::new().expect("cannot create temporary dir");
-    let backend = minion::setup();
-    let opts = minion::DominionOptions {
+    let backend = minion::erased::setup();
+    let opts = minion::SandboxOptions {
         cpu_time_limit: test_case.time_limit(),
         real_time_limit: test_case.real_time_limit(),
         max_alive_process_count: test_case.process_count_limit(),
         memory_limit: MEMORY_LIMIT_IN_BYTES,
         isolation_root: tempdir.path().to_path_buf(),
-        exposed_paths: vec![minion::PathExpositionOptions {
+        exposed_paths: vec![minion::SharedDir {
             src: std::env::current_exe().unwrap(),
             dest: "/me".into(),
-            access: minion::DesiredAccess::Readonly,
+            kind: minion::SharedDirKind::Readonly,
         }],
     };
-    let dominion = backend.new_dominion(opts).expect("can not create dominion");
+    let sandbox = backend.new_sandbox(opts).expect("can not create sandbox");
     let opts = minion::ChildProcessOptions {
         path: "/me".into(),
         arguments: vec![test_case.name().into()],
@@ -37,7 +37,7 @@ pub fn main(test_cases: &[&'static dyn TestCase]) {
             stdout: minion::OutputSpecification::pipe(),
             stderr: minion::OutputSpecification::pipe(),
         },
-        dominion: dominion.clone(),
+        sandbox: sandbox.clone(),
         pwd: "/".into(),
     };
     let mut cp = backend.spawn(opts).expect("failed to spawn child");
@@ -48,5 +48,5 @@ pub fn main(test_cases: &[&'static dyn TestCase]) {
             unreachable!("unexpected wait outcome {:?}", outcome)
         }
     }
-    test_case.check(&mut *cp, dominion);
+    test_case.check(&mut *cp, &*sandbox);
 }

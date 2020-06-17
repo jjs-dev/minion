@@ -1,4 +1,4 @@
-use minion::{self, Dominion};
+use minion::{self};
 use std::time::Duration;
 use structopt::StructOpt;
 
@@ -16,7 +16,7 @@ fn parse_env_item(src: &str) -> Result<EnvItem, &'static str> {
     })
 }
 
-fn parse_path_exposition_item(src: &str) -> Result<minion::PathExpositionOptions, String> {
+fn parse_path_exposition_item(src: &str) -> Result<minion::SharedDir, String> {
     let parts = src.splitn(3, ':').collect::<Vec<_>>();
     if parts.len() != 3 {
         return Err(format!(
@@ -31,9 +31,9 @@ fn parse_path_exposition_item(src: &str) -> Result<minion::PathExpositionOptions
             amask.len()
         ));
     }
-    let access = match amask {
-        "rwx" => minion::DesiredAccess::Full,
-        "r-x" => minion::DesiredAccess::Readonly,
+    let kind = match amask {
+        "rwx" => minion::SharedDirKind::Full,
+        "r-x" => minion::SharedDirKind::Readonly,
         _ => {
             return Err(format!(
                 "unknown access mask {}. rwx or r-x expected",
@@ -41,10 +41,10 @@ fn parse_path_exposition_item(src: &str) -> Result<minion::PathExpositionOptions
             ));
         }
     };
-    Ok(minion::PathExpositionOptions {
+    Ok(minion::SharedDir {
         src: parts[0].to_string().into(),
         dest: parts[2].to_string().into(),
-        access,
+        kind,
     })
 }
 
@@ -92,7 +92,7 @@ struct ExecOpt {
         long = "expose",
         parse(try_from_str = parse_path_exposition_item)
     )]
-    exposed_paths: Vec<minion::PathExpositionOptions>,
+    exposed_paths: Vec<minion::SharedDir>,
 
     /// Process working dir, relative to `isolation_root`
     #[structopt(short = "p", long = "pwd", default_value = "/")]
@@ -108,18 +108,18 @@ fn main() {
         eprintln!("Error: {}", err);
         std::process::exit(1);
     }
-    let backend = minion::setup();
+    let backend = minion::erased::setup();
 
-    let dominion = backend.new_dominion(minion::DominionOptions {
-        max_alive_process_count: options.num_processes.min(u32::max_value() as usize) as u32,
-        memory_limit: options.memory_limit as u64,
-        isolation_root: options.isolation_root.into(),
-        exposed_paths: options.exposed_paths,
-        cpu_time_limit: Duration::from_millis(u64::from(options.time_limit)),
-        real_time_limit: Duration::from_millis(u64::from(options.time_limit * 3)),
-    });
-
-    let dominion = dominion.unwrap();
+    let sandbox = backend
+        .new_sandbox(minion::SandboxOptions {
+            max_alive_process_count: options.num_processes.min(u32::max_value() as usize) as u32,
+            memory_limit: options.memory_limit as u64,
+            isolation_root: options.isolation_root.into(),
+            exposed_paths: options.exposed_paths,
+            cpu_time_limit: Duration::from_millis(u64::from(options.time_limit)),
+            real_time_limit: Duration::from_millis(u64::from(options.time_limit * 3)),
+        })
+        .unwrap();
 
     let (stdin_fd, stdout_fd, stderr_fd);
     unsafe {
@@ -135,7 +135,7 @@ fn main() {
             .iter()
             .map(|v| format!("{}={}", &v.name, &v.value).into())
             .collect(),
-        dominion: dominion.clone(),
+        sandbox: sandbox.clone(),
         stdio: minion::StdioSpecification {
             stdin: unsafe { minion::InputSpecification::handle(stdin_fd) },
             stdout: unsafe { minion::OutputSpecification::handle(stdout_fd) },
@@ -150,10 +150,10 @@ fn main() {
     cp.wait_for_exit(None).unwrap();
     let exit_code = cp.get_exit_code().unwrap();
     println!("---> Child process exited with code {:?} <---", exit_code);
-    if dominion.check_cpu_tle().unwrap() {
+    if sandbox.check_cpu_tle().unwrap() {
         println!("Note: CPU time limit was exceeded");
     }
-    if dominion.check_real_tle().unwrap() {
+    if sandbox.check_real_tle().unwrap() {
         println!("Note: wall-clock time limit was exceeded");
     }
 }

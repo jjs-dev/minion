@@ -1,7 +1,4 @@
-use crate::{
-    Backend, ChildProcess, ChildProcessOptions, DominionRef, InputSpecification,
-    OutputSpecification, StdioSpecification,
-};
+use crate::{erased, InputSpecification, OutputSpecification, StdioSpecification};
 use std::{
     ffi::{OsStr, OsString},
     path::{Path, PathBuf},
@@ -10,7 +7,7 @@ use std::{
 /// Child process builder
 #[derive(Default, Debug)]
 pub struct Command {
-    dominion: Option<DominionRef>,
+    sandbox: Option<Box<dyn erased::Sandbox>>,
     exe: Option<PathBuf>,
     argv: Vec<OsString>,
     env: Vec<OsString>,
@@ -21,14 +18,14 @@ pub struct Command {
 }
 
 impl Command {
-    pub fn build(&self) -> Option<ChildProcessOptions> {
+    pub fn build(&self) -> Option<erased::ChildProcessOptions> {
         let create_default_in_channel = || InputSpecification::empty();
         let create_default_out_channel = || OutputSpecification::ignore();
-        let opts = ChildProcessOptions {
+        let opts = erased::ChildProcessOptions {
             path: self.exe.clone()?,
             arguments: self.argv.clone(),
             environment: self.env.clone(),
-            dominion: self.dominion.clone()?,
+            sandbox: self.sandbox.clone()?,
             stdio: StdioSpecification {
                 stdin: self.stdin.clone().unwrap_or_else(create_default_in_channel),
                 stdout: self
@@ -49,15 +46,18 @@ impl Command {
         Default::default()
     }
 
-    pub fn spawn(&self, backend: &dyn Backend) -> crate::Result<Box<dyn ChildProcess>> {
+    pub fn spawn(
+        &self,
+        backend: &dyn erased::Backend,
+    ) -> crate::Result<Box<dyn erased::ChildProcess>> {
         let options = self
             .build()
             .expect("spawn() was requested, but required fields were not set");
         backend.spawn(options)
     }
 
-    pub fn dominion(&mut self, dominion: DominionRef) -> &mut Self {
-        self.dominion.replace(dominion);
+    pub fn sandbox(&mut self, sandbox: Box<dyn erased::Sandbox>) -> &mut Self {
+        self.sandbox.replace(sandbox);
         self
     }
 
