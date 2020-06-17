@@ -140,6 +140,38 @@ impl crate::TestCase for TOom {
     }
 }
 
+pub(crate) struct TSecurity;
+impl crate::TestCase for TSecurity {
+    fn name(&self) -> &'static str {
+        "test_security_restrictions"
+    }
+    fn description(&self) -> &'static str {
+        "verifies that isolated program can not make certain bad things"
+    }
+    fn test(&self) -> ! {
+        // Check we can not read pid1's environment.
+        let err = std::fs::read("/proc/1/environ").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        // Check we can not create mounts.
+        std::fs::create_dir("/prcfs").unwrap();
+        let err = nix::mount::mount(
+            Some("proc"),
+            "/prcfs",
+            Some("proc"),
+            nix::mount::MsFlags::empty(),
+            None::<&str>,
+        )
+        .unwrap_err();
+        assert!(matches!(err, nix::Error::Sys(nix::errno::Errno::EPERM)));
+        std::process::exit(24)
+    }
+    fn check(&self, cp: &mut dyn minion::ChildProcess, d: minion::DominionRef) {
+        super::assert_exit_code(cp, 24);
+        super::assert_empty(&mut cp.stdout().unwrap());
+        super::assert_empty(&mut cp.stderr().unwrap());
+    }
+}
+
 fn exceed_time_limit() -> ! {
     loop {
         unsafe {
