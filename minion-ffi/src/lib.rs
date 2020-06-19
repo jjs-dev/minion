@@ -1,6 +1,6 @@
 #![cfg_attr(minion_nightly, feature(unsafe_block_in_unsafe_fn))]
 #![cfg_attr(minion_nightly, warn(unsafe_op_in_unsafe_fn))]
-use minion::{self, Dominion as _};
+use minion::{self};
 use std::{
     ffi::{CStr, OsStr, OsString},
     mem::{self},
@@ -50,7 +50,7 @@ unsafe fn get_string(buf: *const c_char) -> OsString {
     s.to_os_string()
 }
 
-pub struct Backend(Box<dyn minion::Backend>);
+pub struct Backend(Box<dyn minion::erased::Backend>);
 
 /// # Safety
 /// Must be called once
@@ -69,7 +69,7 @@ pub unsafe extern "C" fn minion_lib_init() -> ErrorCode {
 #[no_mangle]
 #[must_use]
 pub extern "C" fn minion_backend_create(out: &mut *mut Backend) -> ErrorCode {
-    let backend = Backend(minion::setup());
+    let backend = Backend(minion::erased::setup());
     let backend = Box::new(backend);
     *out = Box::into_raw(backend);
     ErrorCode::Ok
@@ -93,7 +93,7 @@ pub struct TimeSpec {
 }
 
 #[repr(C)]
-pub struct DominionOptions {
+pub struct SandboxOptions {
     pub cpu_time_limit: TimeSpec,
     pub real_time_limit: TimeSpec,
     pub process_limit: u32,
@@ -103,16 +103,16 @@ pub struct DominionOptions {
 }
 
 #[derive(Clone)]
-pub struct Dominion(minion::DominionRef);
+pub struct Sandbox(Box<dyn minion::erased::Sandbox>);
 
 /// # Safety
 /// `out` must be valid
 #[no_mangle]
-pub unsafe extern "C" fn minion_dominion_check_cpu_tle(
-    dominion: &Dominion,
+pub unsafe extern "C" fn minion_sandbox_check_cpu_tle(
+    sandbox: &Sandbox,
     out: *mut bool,
 ) -> ErrorCode {
-    match dominion.0.check_cpu_tle() {
+    match sandbox.0.check_cpu_tle() {
         Ok(st) => {
             unsafe {
                 out.write(st);
@@ -126,11 +126,11 @@ pub unsafe extern "C" fn minion_dominion_check_cpu_tle(
 /// # Safety
 /// `out` must be valid
 #[no_mangle]
-pub unsafe extern "C" fn minion_dominion_check_real_tle(
-    dominion: &Dominion,
+pub unsafe extern "C" fn minion_sandbox_check_real_tle(
+    sandbox: &Sandbox,
     out: *mut bool,
 ) -> ErrorCode {
-    match dominion.0.check_real_tle() {
+    match sandbox.0.check_real_tle() {
         Ok(st) => {
             unsafe {
                 out.write(st);
@@ -142,8 +142,8 @@ pub unsafe extern "C" fn minion_dominion_check_real_tle(
 }
 
 #[no_mangle]
-pub extern "C" fn minion_dominion_kill(dominion: &Dominion) -> ErrorCode {
-    match dominion.0.kill() {
+pub extern "C" fn minion_sandbox_kill(sandbox: &Sandbox) -> ErrorCode {
+    match sandbox.0.kill() {
         Ok(_) => ErrorCode::Ok,
         Err(_) => ErrorCode::Unknown,
     }
@@ -153,21 +153,21 @@ pub extern "C" fn minion_dominion_kill(dominion: &Dominion) -> ErrorCode {
 /// Provided arguments must be well-formed
 #[no_mangle]
 #[must_use]
-pub unsafe extern "C" fn minion_dominion_create(
+pub unsafe extern "C" fn minion_sandbox_create(
     backend: &Backend,
-    options: DominionOptions,
-    out: &mut *mut Dominion,
+    options: SandboxOptions,
+    out: &mut *mut Sandbox,
 ) -> ErrorCode {
     let mut exposed_paths = Vec::new();
     unsafe {
         let mut p = options.shared_directories;
         while !(*p).host_path.is_null() {
-            let opt = minion::PathExpositionOptions {
+            let opt = minion::SharedDir {
                 src: get_string((*p).host_path).into(),
                 dest: get_string((*p).sandbox_path).into(),
-                access: match (*p).kind {
-                    SharedDirectoryAccessKind::Full => minion::DesiredAccess::Full,
-                    SharedDirectoryAccessKind::Readonly => minion::DesiredAccess::Readonly,
+                kind: match (*p).kind {
+                    SharedDirectoryAccessKind::Full => minion::SharedDirKind::Full,
+                    SharedDirectoryAccessKind::Readonly => minion::SharedDirKind::Readonly,
                 },
             };
             exposed_paths.push(opt);
@@ -175,7 +175,7 @@ pub unsafe extern "C" fn minion_dominion_create(
         }
     }
     let isolation_root = unsafe { get_string(options.isolation_root) }.into();
-    let opts = minion::DominionOptions {
+    let opts = minion::SandboxOptions {
         max_alive_process_count: options.process_limit as _,
         memory_limit: u64::from(options.memory_limit),
         cpu_time_limit: std::time::Duration::new(
@@ -189,20 +189,20 @@ pub unsafe extern "C" fn minion_dominion_create(
         isolation_root,
         exposed_paths,
     };
-    let d = backend.0.new_dominion(opts);
+    let d = backend.0.new_sandbox(opts);
     let d = d.unwrap();
 
-    let dw = Dominion(d);
+    let dw = Sandbox(d);
     *out = Box::into_raw(Box::new(dw));
     ErrorCode::Ok
 }
 
 /// # Safety
-/// `dominion` must be pointer, returned by `minion_dominion_create`.
+/// `sandbox` must be pointer, returned by `minion_sandbox_create`.
 #[no_mangle]
 #[must_use]
-pub unsafe extern "C" fn minion_dominion_free(dominion: *mut Dominion) -> ErrorCode {
-    let b = unsafe { Box::from_raw(dominion) };
+pub unsafe extern "C" fn minion_sandbox_free(sandbox: *mut Sandbox) -> ErrorCode {
+    let b = unsafe { Box::from_raw(sandbox) };
     mem::drop(b);
     ErrorCode::Ok
 }
@@ -242,7 +242,7 @@ pub struct ChildProcessOptions {
     pub argv: *const *const c_char,
     pub envp: *const EnvItem,
     pub stdio: StdioHandleSet,
-    pub dominion: *mut Dominion,
+    pub sandbox: *mut Sandbox,
     pub workdir: *const c_char,
 }
 
@@ -269,7 +269,7 @@ pub static SHARED_DIRECTORY_ACCESS_FIN: SharedDirectoryAccess = SharedDirectoryA
     sandbox_path: std::ptr::null(),
 };
 
-pub struct ChildProcess(Box<dyn minion::ChildProcess>);
+pub struct ChildProcess(Box<dyn minion::erased::ChildProcess>);
 
 /// # Safety
 /// Provided `options` must be well-formed
@@ -314,7 +314,7 @@ pub unsafe extern "C" fn minion_cp_spawn(
             path: get_string(options.image_path).into(),
             arguments,
             environment,
-            dominion: (*options.dominion).0.clone(),
+            sandbox: (*options.sandbox).0.clone(),
             stdio,
             pwd: get_string(options.workdir).into(),
         }

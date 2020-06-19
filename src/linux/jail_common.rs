@@ -1,6 +1,6 @@
 use crate::{
     linux::util::{Handle, Pid},
-    PathExpositionOptions,
+    SharedDir,
 };
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
@@ -11,13 +11,13 @@ use tiny_nix_ipc::Socket;
 pub(crate) struct JailOptions {
     pub(crate) max_alive_process_count: u32,
     pub(crate) memory_limit: u64,
-    /// Specifies total CPU time for whole dominion.
+    /// Specifies total CPU time for whole sandbox.
     pub(crate) cpu_time_limit: Duration,
-    /// Specifies wall-closk time limit for whole dominion.
+    /// Specifies wall-closk time limit for whole sandbox.
     /// Possible value: time_limit * 3.
     pub(crate) real_time_limit: Duration,
     pub(crate) isolation_root: PathBuf,
-    pub(crate) exposed_paths: Vec<PathExpositionOptions>,
+    pub(crate) exposed_paths: Vec<SharedDir>,
     pub(crate) jail_id: String,
     pub(crate) watchdog_chan: Handle,
 }
@@ -74,7 +74,7 @@ pub(crate) enum Query {
     Poll(PollQuery),
 }
 
-pub(crate) fn dominion_kill_all(zygote_pid: Pid, jail_id: Option<&str>) -> std::io::Result<()> {
+pub(crate) fn sandbox_kill_all(zygote_pid: Pid, jail_id: Option<&str>) -> std::io::Result<()> {
     // We will kill zygote, and
     // kernel will kill all other processes by itself.
     let send_sig = |signal| {

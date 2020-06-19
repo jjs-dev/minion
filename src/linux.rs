@@ -1,25 +1,24 @@
 pub mod check;
-mod dominion;
 pub mod ext;
 mod jail_common;
 mod pipe;
+mod sandbox;
 mod util;
 mod zygote;
 
-pub use crate::linux::dominion::{DesiredAccess, LinuxDominion};
+pub use crate::linux::sandbox::LinuxSandbox;
 use crate::{
     linux::{
         pipe::{LinuxReadPipe, LinuxWritePipe},
         util::{get_last_error, Handle, Pid},
     },
-    Backend, ChildProcess, ChildProcessOptions, DominionOptions, DominionRef, InputSpecification,
-    InputSpecificationData, OutputSpecification, OutputSpecificationData, WaitOutcome,
+    Backend, ChildProcess, ChildProcessOptions, InputSpecification, InputSpecificationData,
+    OutputSpecification, OutputSpecificationData, SandboxOptions, WaitOutcome,
 };
 use nix::sys::memfd;
 use std::{
     ffi::CString,
     fs,
-    io::{Read, Write},
     os::unix::io::IntoRawFd,
     sync::atomic::{AtomicI64, Ordering},
     time::Duration,
@@ -29,10 +28,10 @@ pub type LinuxHandle = libc::c_int;
 pub struct LinuxChildProcess {
     exit_code: AtomicI64,
 
-    stdin: Option<Box<dyn Write + Send + Sync>>,
-    stdout: Option<Box<dyn Read + Send + Sync>>,
-    stderr: Option<Box<dyn Read + Send + Sync>>,
-    dominion_ref: DominionRef,
+    stdin: Option<LinuxWritePipe>,
+    stdout: Option<LinuxReadPipe>,
+    stderr: Option<LinuxReadPipe>,
+    sandbox_ref: LinuxSandbox,
 
     pid: Pid,
 }
@@ -45,12 +44,13 @@ impl std::fmt::Debug for LinuxChildProcess {
             .finish()
     }
 }
-
-const EXIT_CODE_STILL_RUNNING: i64 = i64::min_value();
-
 // It doesn't intersect with normal exit codes
 // because they fit in i32
+const EXIT_CODE_STILL_RUNNING: i64 = i64::min_value();
+
 impl ChildProcess for LinuxChildProcess {
+    type PipeIn = LinuxWritePipe;
+    type PipeOut = LinuxReadPipe;
     fn get_exit_code(&self) -> crate::Result<Option<i64>> {
         self.poll()?;
         let ec = self.exit_code.load(Ordering::SeqCst);
@@ -61,15 +61,15 @@ impl ChildProcess for LinuxChildProcess {
         Ok(ec)
     }
 
-    fn stdin(&mut self) -> Option<Box<dyn Write + Send + Sync>> {
+    fn stdin(&mut self) -> Option<LinuxWritePipe> {
         self.stdin.take()
     }
 
-    fn stdout(&mut self) -> Option<Box<dyn Read + Send + Sync>> {
+    fn stdout(&mut self) -> Option<LinuxReadPipe> {
         self.stdout.take()
     }
 
-    fn stderr(&mut self) -> Option<Box<dyn Read + Send + Sync>> {
+    fn stderr(&mut self) -> Option<LinuxReadPipe> {
         self.stderr.take()
     }
 
@@ -77,8 +77,7 @@ impl ChildProcess for LinuxChildProcess {
         if self.exit_code.load(Ordering::SeqCst) != EXIT_CODE_STILL_RUNNING {
             return Ok(WaitOutcome::AlreadyFinished);
         }
-        let d = self.dominion_ref.downcast_linux();
-        let wait_result = unsafe { d.poll_job(self.pid, timeout) };
+        let wait_result = unsafe { self.sandbox_ref.poll_job(self.pid, timeout) };
         match wait_result {
             None => Ok(WaitOutcome::Timeout),
             Some(w) => {
@@ -161,7 +160,7 @@ fn handle_output_io(spec: OutputSpecification) -> crate::Result<(Option<Handle>,
     }
 }
 
-fn spawn(mut options: ChildProcessOptions) -> crate::Result<LinuxChildProcess> {
+fn spawn(mut options: ChildProcessOptions<LinuxSandbox>) -> crate::Result<LinuxChildProcess> {
     unsafe {
         let q = jail_common::JobQuery {
             image_path: options.path.clone(),
@@ -176,16 +175,15 @@ fn spawn(mut options: ChildProcessOptions) -> crate::Result<LinuxChildProcess> {
         let (out_r, out_w) = handle_output_io(options.stdio.stdout)?;
         let (err_r, err_w) = handle_output_io(options.stdio.stderr)?;
 
-        let q = dominion::ExtendedJobQuery {
+        let q = sandbox::ExtendedJobQuery {
             job_query: q,
 
             stdin: in_r,
             stdout: out_w,
             stderr: err_w,
         };
-        let d = options.dominion.downcast_linux();
 
-        let spawn_result = d.spawn_job(q);
+        let spawn_result = options.sandbox.spawn_job(q);
 
         // cleanup child stdio now
         libc::close(in_r);
@@ -199,14 +197,12 @@ fn spawn(mut options: ChildProcessOptions) -> crate::Result<LinuxChildProcess> {
 
         let mut stdin = None;
         if let Some(h) = in_w {
-            let box_in: Box<dyn Write + Send + Sync> = Box::new(LinuxWritePipe::new(h));
-            stdin.replace(box_in);
+            stdin.replace(LinuxWritePipe::new(h));
         }
 
-        let process = |maybe_handle, out: &mut Option<Box<dyn Read + Send + Sync>>| {
+        let process = |maybe_handle, out: &mut Option<LinuxReadPipe>| {
             if let Some(h) = maybe_handle {
-                let b: Box<dyn Read + Send + Sync> = Box::new(LinuxReadPipe::new(h));
-                out.replace(b);
+                out.replace(LinuxReadPipe::new(h));
             }
         };
 
@@ -221,31 +217,42 @@ fn spawn(mut options: ChildProcessOptions) -> crate::Result<LinuxChildProcess> {
             stdin,
             stdout,
             stderr,
-            dominion_ref: options.dominion.clone(),
+            sandbox_ref: options.sandbox,
             pid: ret.pid,
         })
     }
 }
 
 #[derive(Debug)]
-pub struct LinuxBackend {}
+pub struct LinuxBackend {
+    _priv: (),
+}
 
 impl Backend for LinuxBackend {
-    fn new_dominion(&self, mut options: DominionOptions) -> crate::Result<DominionRef> {
+    type Sandbox = LinuxSandbox;
+    type ChildProcess = LinuxChildProcess;
+    fn new_sandbox(&self, mut options: SandboxOptions) -> crate::Result<LinuxSandbox> {
         options.postprocess();
-        let dmn = unsafe { LinuxDominion::create(options)? };
-        Ok(DominionRef::from(dmn))
+        let sb = unsafe { LinuxSandbox::create(options)? };
+        Ok(sb)
     }
 
-    fn spawn(&self, options: ChildProcessOptions) -> crate::Result<Box<dyn ChildProcess>> {
-        let cp = spawn(options);
-        match cp {
-            Ok(cp) => Ok(Box::new(cp)),
-            Err(e) => Err(e),
-        }
+    fn spawn(
+        &self,
+        options: ChildProcessOptions<LinuxSandbox>,
+    ) -> crate::Result<Self::ChildProcess> {
+        spawn(options)
     }
 }
 
-pub fn setup_execution_manager() -> LinuxBackend {
-    LinuxBackend {}
+impl LinuxBackend {
+    pub fn new() -> LinuxBackend {
+        LinuxBackend { _priv: () }
+    }
+}
+
+impl Default for LinuxBackend {
+    fn default() -> Self {
+        LinuxBackend::new()
+    }
 }

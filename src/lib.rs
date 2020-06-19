@@ -12,15 +12,16 @@ mod command;
 #[cfg(target_os = "linux")]
 pub mod linux;
 
+pub mod erased;
+
 use serde::{Deserialize, Serialize};
 
 #[cfg(target_os = "linux")]
-pub use crate::linux::{LinuxBackend, LinuxChildProcess, LinuxDominion};
+pub use crate::linux::{LinuxBackend, LinuxChildProcess, LinuxSandbox};
 
 use std::{
     fmt::Debug,
     io::{Read, Write},
-    sync::Arc,
     time::Duration,
 };
 
@@ -41,25 +42,37 @@ pub fn check() -> Option<String> {
 
 /// Represents way of isolation
 pub trait Backend: Debug + Send + Sync {
-    fn new_dominion(&self, options: DominionOptions) -> Result<DominionRef>;
-    fn spawn(&self, options: ChildProcessOptions) -> Result<Box<dyn ChildProcess>>;
+    type Sandbox: Sandbox;
+    type ChildProcess: ChildProcess;
+    fn new_sandbox(&self, options: SandboxOptions) -> Result<Self::Sandbox>;
+    fn spawn(&self, options: ChildProcessOptions<Self::Sandbox>) -> Result<Self::ChildProcess>;
 }
-
-#[cfg(target_os = "linux")]
-pub use {linux::DesiredAccess, linux::LinuxHandle};
 
 pub use command::Command;
 
+/// Mount options.
+/// * Readonly: jailed process can read & execute, but not write to
+/// * Full: jailed process can read & write & execute
+///
+/// Anyway, SUID-bit will be disabled.
+///
+/// Warning: this type is __unstable__ (i.e. not covered by SemVer) and __non-portable__
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct PathExpositionOptions {
+pub enum SharedDirKind {
+    Readonly,
+    Full,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SharedDir {
     /// Path on system
     pub src: PathBuf,
     /// Path for child
     pub dest: PathBuf,
-    pub access: DesiredAccess,
+    pub kind: SharedDirKind,
 }
 
-/// This struct is returned by `Dominion::query_usage_data`
+/// This struct is returned by `Sandbox::resource_usage`
 /// It represents various resource usage
 /// Some items can be absent or rounded
 #[derive(Debug, Copy, Clone, Default)]
@@ -71,19 +84,19 @@ pub struct ResourceUsageData {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct DominionOptions {
+pub struct SandboxOptions {
     pub max_alive_process_count: u32,
     /// Memory limit for all processes in cgroup, in bytes
     pub memory_limit: u64,
-    /// Specifies total CPU time for whole dominion
+    /// Specifies total CPU time for whole sandbox
     pub cpu_time_limit: Duration,
-    /// Specifies total wall-clock timer limit for whole dominion
+    /// Specifies total wall-clock timer limit for whole sandbox
     pub real_time_limit: Duration,
     pub isolation_root: PathBuf,
-    pub exposed_paths: Vec<PathExpositionOptions>,
+    pub exposed_paths: Vec<SharedDir>,
 }
 
-impl DominionOptions {
+impl SandboxOptions {
     fn make_relative<'a>(&self, p: &'a Path) -> &'a Path {
         if p.starts_with("/") {
             p.strip_prefix("/").unwrap()
@@ -102,80 +115,21 @@ impl DominionOptions {
 }
 
 /// Represents highly-isolated sandbox
-pub trait Dominion: Debug + std::any::Any + 'static {
+pub trait Sandbox: Clone + Debug + 'static {
     fn id(&self) -> String;
 
-    /// Returns true if dominion exceeded CPU time limit
+    /// Returns true if sandbox exceeded CPU time limit
     fn check_cpu_tle(&self) -> Result<bool>;
 
-    /// Returns true if dominion exceeded wall-clock time limit
+    /// Returns true if sandbox exceeded wall-clock time limit
     fn check_real_tle(&self) -> Result<bool>;
 
-    /// Kills all processed in dominion.
+    /// Kills all processes in sandbox.
     /// Probably, subsequent `spawn` requests will fail.
     fn kill(&self) -> Result<()>;
 
-    /// Returns information about resource usage by total dominion
+    /// Returns information about resource usage by total sandbox
     fn resource_usage(&self) -> Result<ResourceUsageData>;
-}
-
-#[derive(Debug)]
-enum DominionRefInner {
-    Linux(LinuxDominion),
-}
-
-/// Type-erased dominion
-#[derive(Clone, Debug)]
-pub struct DominionRef(Arc<DominionRefInner>);
-
-impl DominionRef {
-    // Private downcasting support
-
-    /// Downcast to LinuxDominion.
-    /// If `self` contains some other, this function will panic.
-    pub(crate) fn downcast_linux(&self) -> &LinuxDominion {
-        match &*self.0 {
-            DominionRefInner::Linux(lx) => lx,
-        }
-    }
-}
-
-impl From<LinuxDominion> for DominionRef {
-    fn from(lx: LinuxDominion) -> Self {
-        DominionRef(Arc::new(DominionRefInner::Linux(lx)))
-    }
-}
-
-impl std::ops::Deref for DominionRefInner {
-    type Target = dyn Dominion;
-
-    fn deref(&self) -> &dyn Dominion {
-        match self {
-            DominionRefInner::Linux(lx) => lx,
-        }
-    }
-}
-
-impl Dominion for DominionRef {
-    fn id(&self) -> String {
-        self.0.id()
-    }
-
-    fn check_cpu_tle(&self) -> Result<bool> {
-        self.0.check_cpu_tle()
-    }
-
-    fn check_real_tle(&self) -> Result<bool> {
-        self.0.check_real_tle()
-    }
-
-    fn kill(&self) -> Result<()> {
-        self.0.kill()
-    }
-
-    fn resource_usage(&self) -> Result<ResourceUsageData> {
-        self.0.resource_usage()
-    }
 }
 
 /// Configures stdin for child
@@ -276,13 +230,13 @@ pub struct StdioSpecification {
 /// This type should only be used by Backend implementations
 /// Use `Command` instead
 #[derive(Debug, Clone)]
-pub struct ChildProcessOptions {
+pub struct ChildProcessOptions<Sandbox> {
     pub path: PathBuf,
     pub arguments: Vec<OsString>,
     pub environment: Vec<OsString>,
-    pub dominion: DominionRef,
+    pub sandbox: Sandbox,
     pub stdio: StdioSpecification,
-    /// Child's working dir. Relative to `dominion` isolation_root
+    /// Child's working dir. Relative to `sandbox` isolation_root
     pub pwd: PathBuf,
 }
 
@@ -369,7 +323,11 @@ pub enum WaitOutcome {
 }
 
 /// Represents child process.
-pub trait ChildProcess: Debug {
+pub trait ChildProcess: Debug + 'static {
+    /// Represents pipe from current process to isolated
+    type PipeIn: Write + Send + Sync + 'static;
+    /// Represents pipe from isolated process to current
+    type PipeOut: Read + Send + Sync + 'static;
     /// Returns exit code, if process had exited by the moment of call, or None otherwise.
     fn get_exit_code(&self) -> Result<Option<i64>>;
 
@@ -380,7 +338,7 @@ pub trait ChildProcess: Debug {
     ///
     /// On all subsequent calls, None will be returned
 
-    fn stdin(&mut self) -> Option<Box<dyn Write + Send + Sync>>;
+    fn stdin(&mut self) -> Option<Self::PipeIn>;
 
     /// Returns readable stream, connected to child stdoutn
     ///
@@ -388,7 +346,7 @@ pub trait ChildProcess: Debug {
     /// Otherwise, None will be returned
     ///
     /// On all subsequent calls, None will be returned
-    fn stdout(&mut self) -> Option<Box<dyn Read + Send + Sync>>;
+    fn stdout(&mut self) -> Option<Self::PipeOut>;
 
     /// Returns readable stream, connected to child stderr
     ///
@@ -396,7 +354,7 @@ pub trait ChildProcess: Debug {
     /// Otherwise, None will be returned
     ///
     /// On all subsequent calls, None will be returned
-    fn stderr(&mut self) -> Option<Box<dyn Read + Send + Sync>>;
+    fn stderr(&mut self) -> Option<Self::PipeOut>;
 
     /// Waits for child process exit with timeout.
     /// If timeout is None, `wait_for_exit` will block until child has exited
@@ -408,12 +366,4 @@ pub trait ChildProcess: Debug {
     /// Returns whether child process has exited by the moment of call
     /// This function doesn't blocks on waiting (see `wait_for_exit`).
     fn is_finished(&self) -> Result<bool>;
-}
-
-#[cfg(target_os = "linux")]
-pub type DefaultBackend = linux::LinuxBackend;
-
-#[cfg(target_os = "linux")]
-pub fn setup() -> Box<dyn Backend> {
-    Box::new(linux::setup_execution_manager())
 }

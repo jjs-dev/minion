@@ -7,7 +7,7 @@ use crate::{
             WM_CLASS_SETUP_FINISHED,
         },
     },
-    DesiredAccess, PathExpositionOptions,
+    SharedDir, SharedDirKind,
 };
 use std::{ffi::CString, fs, io, io::Write, os::unix::ffi::OsStrExt, path::Path, ptr, time};
 use tiny_nix_ipc::Socket;
@@ -40,7 +40,7 @@ fn configure_dir(dir_path: &Path) -> crate::Result<()> {
     Ok(())
 }
 
-fn expose_dir(jail_root: &Path, system_path: &Path, alias_path: &Path, access: DesiredAccess) {
+fn expose_dir(jail_root: &Path, system_path: &Path, alias_path: &Path, kind: SharedDirKind) {
     let bind_target = jail_root.join(alias_path);
     fs::create_dir_all(&bind_target).unwrap();
     let stat = fs::metadata(&system_path)
@@ -63,7 +63,7 @@ fn expose_dir(jail_root: &Path, system_path: &Path, alias_path: &Path, access: D
             err_exit("mount");
         }
 
-        if let DesiredAccess::Readonly = access {
+        if let SharedDirKind::Readonly = kind {
             let rem_ret = libc::mount(
                 ptr::null(),
                 bind_target.as_ptr(),
@@ -78,10 +78,10 @@ fn expose_dir(jail_root: &Path, system_path: &Path, alias_path: &Path, access: D
     }
 }
 
-pub(crate) fn expose_dirs(expose: &[PathExpositionOptions], jail_root: &Path) {
+pub(crate) fn expose_dirs(expose: &[SharedDir], jail_root: &Path) {
     // mount --bind
     for x in expose {
-        expose_dir(jail_root, &x.src, &x.dest, x.access.clone())
+        expose_dir(jail_root, &x.src, &x.dest, x.kind.clone())
     }
 }
 
@@ -203,7 +203,7 @@ pub(in crate::linux) fn setup(
     setup_chroot(&jail_params)?;
     sock.wake(WM_CLASS_SETUP_FINISHED)?;
     let mut logger = crate::linux::util::StraceLogger::new();
-    writeln!(logger, "dominion {}: setup done", &jail_params.jail_id).unwrap();
+    writeln!(logger, "sandbox {}: setup done", &jail_params.jail_id).unwrap();
     let res = SetupData { cgroups: handles };
     Ok(res)
 }
@@ -217,7 +217,7 @@ fn cpu_time_observer(
     chan: std::os::unix::io::RawFd,
 ) -> ! {
     let mut logger = crate::linux::util::StraceLogger::new();
-    writeln!(logger, "dominion {}: cpu time watcher", jail_id).unwrap();
+    writeln!(logger, "sandbox {}: cpu time watcher", jail_id).unwrap();
     let start = time::Instant::now();
     loop {
         nix::unistd::sleep(1);
@@ -244,9 +244,9 @@ fn cpu_time_observer(
             nix::unistd::write(chan, b"r").ok();
         }
         // since we are inside pid ns, we can refer to zygote as pid1.
-        let err = jail_common::dominion_kill_all(1 as Pid, None);
+        let err = jail_common::sandbox_kill_all(1 as Pid, None);
         if let Err(err) = err {
-            eprintln!("minion-watchdog: failed to kill dominion {}", err);
+            eprintln!("minion-watchdog: failed to kill sandbox {}", err);
         }
         // we will be killed by kernel too
     }

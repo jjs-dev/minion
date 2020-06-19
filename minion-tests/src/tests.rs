@@ -1,7 +1,7 @@
 mod simple;
 
 use crate::TestCase;
-use minion::ChildProcess;
+use minion::erased::ChildProcess;
 use once_cell::sync::Lazy;
 use std::io::Read;
 

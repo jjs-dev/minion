@@ -1,5 +1,5 @@
 //! this module implements a Zygote.
-//! Jygote is a long-running process in dominion.
+//! Jygote is a long-running process in sandbox.
 //! In particular, zygote is namespace root.
 //! Zygote accepts queries for spawning child process
 
@@ -206,7 +206,7 @@ extern "C" fn do_exec(mut arg: DoExecArg) -> ! {
         libc::dup2(arg.stdio.stderr, libc::STDERR_FILENO);
 
         let mut logger = crate::linux::util::StraceLogger::new();
-        writeln!(logger, "dominion {}: ready to execve", arg.jail_id).unwrap();
+        writeln!(logger, "sandbox {}: ready to execve", arg.jail_id).unwrap();
 
         libc::execve(
             path,
@@ -414,12 +414,7 @@ fn start_zygote_caller(
     socket: Socket,
 ) -> crate::Result<ZygoteStartupInfo> {
     let mut logger = crate::linux::util::strace_logger();
-    write!(
-        logger,
-        "dominion {}: thread A (main)",
-        &jail_options.jail_id
-    )
-    .unwrap();
+    write!(logger, "sandbox {}: thread A (main)", &jail_options.jail_id).unwrap();
 
     let mut zygote_pid_bytes = [0 as u8; 4];
 
@@ -448,7 +443,7 @@ fn start_zygote_initialization_helper(
     let mut logger = crate::linux::util::strace_logger();
     write!(
         logger,
-        "dominion {}: thread B (zygote launcher)",
+        "sandbox {}: thread B (zygote launcher)",
         &jail_options.jail_id
     )
     .unwrap();
@@ -479,7 +474,7 @@ fn start_zygote_main_process(jail_options: JailOptions, socket: Socket, zyg_sock
     let mut logger = crate::linux::util::strace_logger();
     write!(
         logger,
-        "dominion {}: thread C (zygote main)",
+        "sandbox {}: thread C (zygote main)",
         &jail_options.jail_id
     )
     .unwrap();
