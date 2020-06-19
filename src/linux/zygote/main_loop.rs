@@ -1,6 +1,6 @@
 use crate::linux::{
     jail_common::{JobQuery, Query},
-    util::{Handle, IpcSocketExt, Pid, StraceLogger},
+    util::{Fd, IpcSocketExt, Pid, StraceLogger},
     zygote::{setup, spawn_job, JobOptions, SetupData, Stdio, ZygoteOptions},
 };
 use std::{io::Write, time::Duration};
@@ -15,12 +15,7 @@ fn process_spawn_query(
     // Now we do some preprocessing.
     let env: Vec<_> = options.environment.clone();
 
-    let mut child_fds = arg
-        .sock
-        .recv_struct::<u64, [Handle; 3]>()
-        .unwrap()
-        .1
-        .unwrap();
+    let mut child_fds = arg.sock.recv_struct::<u64, [Fd; 3]>().unwrap().1.unwrap();
     for f in child_fds.iter_mut() {
         let old = *f;
         let new = nix::unistd::dup(old).unwrap();
@@ -54,10 +49,10 @@ fn process_poll_query(
     Ok(())
 }
 const RETURN_CODE_OK: i32 = 0;
-const RETURN_CODE_BAD_QUERY: i32 = 1;
+const RETURN_CODE_BAD_QUERY: i32 = 0xBAD;
 
 pub(crate) fn zygote_entry(mut arg: ZygoteOptions) -> crate::Result<i32> {
-    let setup_data = setup::setup(&arg.jail_options, &mut arg.sock)?;
+    let setup_data = setup::setup(&arg.jail_options, &mut arg.sock, arg.cgroup_driver)?;
 
     let mut logger = StraceLogger::new();
     loop {

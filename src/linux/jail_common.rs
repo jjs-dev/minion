@@ -1,5 +1,5 @@
 use crate::{
-    linux::util::{Handle, Pid},
+    linux::util::{Fd, Pid},
     SharedDir,
 };
 use rand::seq::SliceRandom;
@@ -19,14 +19,8 @@ pub(crate) struct JailOptions {
     pub(crate) isolation_root: PathBuf,
     pub(crate) exposed_paths: Vec<SharedDir>,
     pub(crate) jail_id: String,
-    pub(crate) watchdog_chan: Handle,
-}
-
-pub(crate) fn get_path_for_cgroup_legacy_subsystem(subsys_name: &str, cgroup_id: &str) -> PathBuf {
-    std::path::Path::new("/sys/fs/cgroup")
-        .join(subsys_name)
-        .join("jjs")
-        .join(format!("g-{}", cgroup_id))
+    pub(crate) watchdog_chan: Fd,
+    pub(crate) allow_mount_ns_failure: bool,
 }
 
 const ID_CHARS: &[u8] = b"qwertyuiopasdfghjklzxcvbnm1234567890";
@@ -74,21 +68,36 @@ pub(crate) enum Query {
     Poll(PollQuery),
 }
 
-pub(crate) fn sandbox_kill_all(zygote_pid: Pid, jail_id: Option<&str>) -> std::io::Result<()> {
+fn send_term_signals(target_pid: Pid) {
+    for &sig in &[
+        nix::sys::signal::SIGKILL,
+        nix::sys::signal::SIGTERM,
+        nix::sys::signal::SIGABRT,
+    ] {
+        nix::sys::signal::kill(nix::unistd::Pid::from_raw(target_pid), sig).ok();
+    }
+}
+
+/// Kills sandbox where current process is executed
+pub(crate) fn kill_this_sandbox() -> ! {
+    send_term_signals(1);
+    // now let's wait while kernel will kill us
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
+/// Kills sandbox by zygote pid and cgroup_id
+pub(in crate::linux) fn kill_sandbox(
+    zygote_pid: Pid,
+    cgroup_id: &str,
+    cgroup_driver: &crate::linux::cgroup::Driver,
+) -> std::io::Result<()> {
     // We will kill zygote, and
     // kernel will kill all other processes by itself.
-    let send_sig = |signal| {
-        nix::sys::signal::kill(nix::unistd::Pid::from_raw(zygote_pid), signal).ok();
-    };
-    send_sig(nix::sys::signal::SIGKILL);
-    send_sig(nix::sys::signal::SIGTERM);
-    send_sig(nix::sys::signal::SIGABRT);
-    let jail_id = match jail_id {
-        Some(j) => j,
-        None => return Ok(()),
-    };
+    send_term_signals(zygote_pid);
     // now let's wait until kill is done
-    let pids_tasks_file_path = super::zygote::cgroup::get_cgroup_tasks_file_path(jail_id);
+    let pids_tasks_file_path = cgroup_driver.get_cgroup_tasks_file_path(cgroup_id);
     loop {
         let buf = std::fs::read(&pids_tasks_file_path)?;
         let has_some = buf.iter().take(8).any(|c| c.is_ascii_digit());

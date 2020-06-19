@@ -1,3 +1,4 @@
+mod cgroup;
 pub mod check;
 pub mod ext;
 mod jail_common;
@@ -10,7 +11,7 @@ pub use crate::linux::sandbox::LinuxSandbox;
 use crate::{
     linux::{
         pipe::{LinuxReadPipe, LinuxWritePipe},
-        util::{get_last_error, Handle, Pid},
+        util::{get_last_error, Fd, Pid},
     },
     Backend, ChildProcess, ChildProcessOptions, InputSpecification, InputSpecificationData,
     OutputSpecification, OutputSpecificationData, SandboxOptions, WaitOutcome,
@@ -20,7 +21,9 @@ use std::{
     ffi::CString,
     fs,
     os::unix::io::IntoRawFd,
+    path::PathBuf,
     sync::atomic::{AtomicI64, Ordering},
+    sync::Arc,
     time::Duration,
 };
 
@@ -98,7 +101,7 @@ impl ChildProcess for LinuxChildProcess {
     }
 }
 
-fn handle_input_io(spec: InputSpecification) -> crate::Result<(Option<Handle>, Handle)> {
+fn handle_input_io(spec: InputSpecification) -> crate::Result<(Option<Fd>, Fd)> {
     match spec.0 {
         InputSpecificationData::Pipe => {
             let mut h_read = 0;
@@ -109,7 +112,7 @@ fn handle_input_io(spec: InputSpecification) -> crate::Result<(Option<Handle>, H
             Ok((Some(h_write), f))
         }
         InputSpecificationData::Handle(rh) => {
-            let h = rh as Handle;
+            let h = rh as Fd;
             Ok((None, h))
         }
         InputSpecificationData::Empty => {
@@ -117,14 +120,14 @@ fn handle_input_io(spec: InputSpecification) -> crate::Result<(Option<Handle>, H
             let file = file.into_raw_fd();
             Ok((None, file))
         }
-        InputSpecificationData::Null => Ok((None, -1 as Handle)),
+        InputSpecificationData::Null => Ok((None, -1 as Fd)),
     }
 }
 
-fn handle_output_io(spec: OutputSpecification) -> crate::Result<(Option<Handle>, Handle)> {
+fn handle_output_io(spec: OutputSpecification) -> crate::Result<(Option<Fd>, Fd)> {
     match spec.0 {
-        OutputSpecificationData::Null => Ok((None, -1 as Handle)),
-        OutputSpecificationData::Handle(rh) => Ok((None, rh as Handle)),
+        OutputSpecificationData::Null => Ok((None, -1 as Fd)),
+        OutputSpecificationData::Handle(rh) => Ok((None, rh as Fd)),
         OutputSpecificationData::Pipe => {
             let mut h_read = 0;
             let mut h_write = 0;
@@ -223,9 +226,37 @@ fn spawn(mut options: ChildProcessOptions<LinuxSandbox>) -> crate::Result<LinuxC
     }
 }
 
+/// Allows some customization
+#[non_exhaustive]
+#[derive(Debug)]
+pub struct Settings {
+    /// All created cgroups will be children of specified group
+    /// Default value is "/minion"
+    pub cgroup_prefix: PathBuf,
+
+    /// If enabled, minion will ignore clone(MOUNT_NEWNS) error.
+    /// This flag has to be enabled for gVisor support.
+    pub allow_unsupported_mount_namespace: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            cgroup_prefix: "/minion".into(),
+            allow_unsupported_mount_namespace: false,
+        }
+    }
+}
+
+impl Settings {
+    pub fn new() -> Settings {
+        Default::default()
+    }
+}
 #[derive(Debug)]
 pub struct LinuxBackend {
-    _priv: (),
+    settings: Settings,
+    cgroup_driver: Arc<cgroup::Driver>,
 }
 
 impl Backend for LinuxBackend {
@@ -233,7 +264,8 @@ impl Backend for LinuxBackend {
     type ChildProcess = LinuxChildProcess;
     fn new_sandbox(&self, mut options: SandboxOptions) -> crate::Result<LinuxSandbox> {
         options.postprocess();
-        let sb = unsafe { LinuxSandbox::create(options)? };
+        let sb =
+            unsafe { LinuxSandbox::create(options, &self.settings, self.cgroup_driver.clone())? };
         Ok(sb)
     }
 
@@ -246,13 +278,11 @@ impl Backend for LinuxBackend {
 }
 
 impl LinuxBackend {
-    pub fn new() -> LinuxBackend {
-        LinuxBackend { _priv: () }
-    }
-}
-
-impl Default for LinuxBackend {
-    fn default() -> Self {
-        LinuxBackend::new()
+    pub fn new(settings: Settings) -> crate::Result<LinuxBackend> {
+        let cgroup_driver = Arc::new(cgroup::Driver::new(&settings)?);
+        Ok(LinuxBackend {
+            settings,
+            cgroup_driver,
+        })
     }
 }

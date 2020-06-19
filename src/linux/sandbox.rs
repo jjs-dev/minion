@@ -2,7 +2,7 @@ use crate::{
     linux::{
         jail_common,
         pipe::setup_pipe,
-        util::{ExitCode, Handle, IpcSocketExt, Pid},
+        util::{ExitCode, Fd, IpcSocketExt, Pid},
         zygote,
     },
     Sandbox, SandboxOptions,
@@ -60,17 +60,18 @@ struct LinuxSandboxInner {
     zygote_sock: Mutex<Socket>,
     zygote_pid: Pid,
     state: SandboxState,
-    watchdog_chan: Handle,
+    watchdog_chan: Fd,
+    cgroup_driver: Arc<crate::linux::cgroup::Driver>,
 }
 
 #[derive(Debug)]
 struct LinuxSandboxDebugHelper<'a> {
     id: &'a str,
     options: &'a SandboxOptions,
-    zygote_sock: Handle,
+    zygote_sock: Fd,
     zygote_pid: Pid,
     state: SandboxState,
-    watchdog_chan: Handle,
+    watchdog_chan: Fd,
 }
 
 impl Debug for LinuxSandbox {
@@ -104,14 +105,14 @@ impl Sandbox for LinuxSandbox {
     }
 
     fn kill(&self) -> crate::Result<()> {
-        jail_common::sandbox_kill_all(self.0.zygote_pid, Some(&self.0.id))
+        jail_common::kill_sandbox(self.0.zygote_pid, &self.0.id, &self.0.cgroup_driver)
             .map_err(|err| crate::Error::Io { source: err })?;
         Ok(())
     }
 
     fn resource_usage(&self) -> crate::Result<crate::ResourceUsageData> {
-        let cpu_usage = zygote::cgroup::get_cpu_usage(&self.0.id);
-        let memory_usage = zygote::cgroup::get_memory_usage(&self.0.id);
+        let cpu_usage = self.0.cgroup_driver.get_cpu_usage(&self.0.id);
+        let memory_usage = self.0.cgroup_driver.get_memory_usage(&self.0.id);
         Ok(crate::ResourceUsageData {
             memory: memory_usage,
             time: Some(cpu_usage),
@@ -121,9 +122,9 @@ impl Sandbox for LinuxSandbox {
 
 pub(crate) struct ExtendedJobQuery {
     pub(crate) job_query: jail_common::JobQuery,
-    pub(crate) stdin: Handle,
-    pub(crate) stdout: Handle,
-    pub(crate) stderr: Handle,
+    pub(crate) stdin: Fd,
+    pub(crate) stdout: Fd,
+    pub(crate) stderr: Fd,
 }
 
 impl LinuxSandbox {
@@ -149,7 +150,11 @@ impl LinuxSandbox {
         Ok(())
     }
 
-    pub(crate) unsafe fn create(options: SandboxOptions) -> crate::Result<LinuxSandbox> {
+    pub(in crate::linux) unsafe fn create(
+        options: SandboxOptions,
+        settings: &crate::linux::Settings,
+        cgroup_driver: Arc<crate::linux::cgroup::Driver>,
+    ) -> crate::Result<LinuxSandbox> {
         let jail_id = jail_common::gen_jail_id();
         let mut read_end = 0;
         let mut write_end = 0;
@@ -168,8 +173,9 @@ impl LinuxSandbox {
             exposed_paths: options.exposed_paths.clone(),
             jail_id: jail_id.clone(),
             watchdog_chan: write_end,
+            allow_mount_ns_failure: settings.allow_unsupported_mount_namespace,
         };
-        let startup_info = zygote::start_zygote(jail_options)?;
+        let startup_info = zygote::start_zygote(jail_options, &cgroup_driver)?;
 
         let inner = LinuxSandboxInner {
             id: jail_id,
@@ -181,6 +187,7 @@ impl LinuxSandbox {
                 was_cpu_tle: AtomicBool::new(false),
                 was_wall_tle: AtomicBool::new(false),
             },
+            cgroup_driver,
         };
 
         Ok(LinuxSandbox(Arc::new(inner)))
@@ -228,7 +235,9 @@ impl Drop for LinuxSandbox {
         }
         // Remove cgroups.
         if std::env::var("MINION_DEBUG_KEEP_CGROUPS").is_err() {
-            zygote::cgroup::drop(&self.0.id, &["pids", "memory", "cpuacct"]);
+            self.0
+                .cgroup_driver
+                .drop_cgroup(&self.0.id, &["pids", "memory", "cpuacct"]);
         }
 
         // Close handles

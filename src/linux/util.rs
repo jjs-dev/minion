@@ -6,7 +6,7 @@ use std::{
 };
 use tiny_nix_ipc::{self, Socket};
 
-pub type Handle = RawFd;
+pub type Fd = RawFd;
 
 pub type Pid = libc::pid_t;
 pub type ExitCode = i64;
@@ -114,14 +114,14 @@ pub fn duplicate_string(arg: &OsStr) -> *mut c_char {
     }
 }
 
-const STRACE_LOGGER_HANDLE: Handle = -779;
+const STRACE_LOGGER_FD: Fd = -779;
 
 #[derive(Copy, Clone, Default)]
-pub struct StraceLogger(i32);
+pub struct StraceLogger(Fd);
 
 #[allow(dead_code)]
 pub fn strace_logger() -> StraceLogger {
-    StraceLogger(STRACE_LOGGER_HANDLE)
+    StraceLogger(STRACE_LOGGER_FD)
 }
 
 impl StraceLogger {

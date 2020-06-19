@@ -108,7 +108,13 @@ fn main() {
         eprintln!("Error: {}", err);
         std::process::exit(1);
     }
-    let backend = minion::erased::setup();
+    let backend = match minion::erased::setup() {
+        Ok(b) => b,
+        Err(err) => {
+            eprintln!("Backend initialization failed: {}", err);
+            std::process::exit(1);
+        }
+    };
 
     let sandbox = backend
         .new_sandbox(minion::SandboxOptions {

@@ -1,7 +1,7 @@
 use crate::{
     linux::{
         jail_common::{self, JailOptions},
-        util::{err_exit, Handle, IpcSocketExt, Pid, StraceLogger},
+        util::{err_exit, Fd, IpcSocketExt, StraceLogger},
         zygote::{
             SANDBOX_INTERNAL_UID, WM_CLASS_PID_MAP_CREATED, WM_CLASS_PID_MAP_READY_FOR_SETUP,
             WM_CLASS_SETUP_FINISHED,
@@ -13,7 +13,7 @@ use std::{ffi::CString, fs, io, io::Write, os::unix::ffi::OsStrExt, path::Path, 
 use tiny_nix_ipc::Socket;
 
 pub(in crate::linux) struct SetupData {
-    pub(in crate::linux) cgroups: super::cgroup::Group,
+    pub(in crate::linux) cgroup_join_handle: crate::linux::cgroup::JoinHandle,
 }
 
 fn configure_dir(dir_path: &Path) -> crate::Result<()> {
@@ -153,7 +153,10 @@ fn setup_uid_mapping(sock: &mut Socket) -> crate::Result<()> {
     Ok(())
 }
 
-fn setup_time_watch(jail_options: &JailOptions) -> crate::Result<()> {
+fn setup_time_watch(
+    jail_options: &JailOptions,
+    cgroup_driver: &crate::linux::cgroup::Driver,
+) -> crate::Result<()> {
     let cpu_tl = jail_options.cpu_time_limit.as_nanos() as u64;
     let real_tl = jail_options.real_time_limit.as_nanos() as u64;
     observe_time(
@@ -161,6 +164,7 @@ fn setup_time_watch(jail_options: &JailOptions) -> crate::Result<()> {
         cpu_tl,
         real_tl,
         jail_options.watchdog_chan,
+        cgroup_driver,
     )
 }
 
@@ -190,6 +194,7 @@ fn setup_panic_hook() {
 pub(in crate::linux) fn setup(
     jail_params: &JailOptions,
     sock: &mut Socket,
+    cgroup_driver: &crate::linux::cgroup::Driver,
 ) -> crate::Result<SetupData> {
     setup_panic_hook();
     setup_sighandler();
@@ -198,13 +203,19 @@ pub(in crate::linux) fn setup(
     configure_dir(&jail_params.isolation_root)?;
     setup_expositions(&jail_params);
     setup_procfs(&jail_params)?;
-    let handles = super::cgroup::setup_cgroups(&jail_params);
-    setup_time_watch(&jail_params)?;
+    let cgroup_join_handle = cgroup_driver.create_group(
+        &jail_params.jail_id,
+        &crate::linux::cgroup::ResourceLimits {
+            pids_max: jail_params.max_alive_process_count,
+            memory_max: jail_params.memory_limit,
+        },
+    );
+    setup_time_watch(&jail_params, cgroup_driver)?;
     setup_chroot(&jail_params)?;
     sock.wake(WM_CLASS_SETUP_FINISHED)?;
     let mut logger = crate::linux::util::StraceLogger::new();
     writeln!(logger, "sandbox {}: setup done", &jail_params.jail_id).unwrap();
-    let res = SetupData { cgroups: handles };
+    let res = SetupData { cgroup_join_handle };
     Ok(res)
 }
 
@@ -215,6 +226,7 @@ fn cpu_time_observer(
     cpu_time_limit: u64,
     real_time_limit: u64,
     chan: std::os::unix::io::RawFd,
+    driver: &crate::linux::cgroup::Driver,
 ) -> ! {
     let mut logger = crate::linux::util::StraceLogger::new();
     writeln!(logger, "sandbox {}: cpu time watcher", jail_id).unwrap();
@@ -224,7 +236,7 @@ fn cpu_time_observer(
 
         let elapsed = time::Instant::now().duration_since(start);
         let elapsed = elapsed.as_nanos();
-        let current_usage = super::cgroup::get_cpu_usage(jail_id);
+        let current_usage = driver.get_cpu_usage(jail_id);
         let was_cpu_tle = current_usage > cpu_time_limit;
         let was_real_tle = elapsed as u64 > real_time_limit;
         let ok = !was_cpu_tle && !was_real_tle;
@@ -243,12 +255,7 @@ fn cpu_time_observer(
             .unwrap();
             nix::unistd::write(chan, b"r").ok();
         }
-        // since we are inside pid ns, we can refer to zygote as pid1.
-        let err = jail_common::sandbox_kill_all(1 as Pid, None);
-        if let Err(err) = err {
-            eprintln!("minion-watchdog: failed to kill sandbox {}", err);
-        }
-        // we will be killed by kernel too
+        jail_common::kill_this_sandbox();
     }
 }
 
@@ -256,14 +263,19 @@ fn observe_time(
     jail_id: &str,
     cpu_time_limit: u64,
     real_time_limit: u64,
-    chan: Handle,
+    chan: Fd,
+    cgroup_driver: &crate::linux::cgroup::Driver,
 ) -> crate::Result<()> {
     let fret = nix::unistd::fork()?;
 
     match fret {
-        nix::unistd::ForkResult::Child => {
-            cpu_time_observer(jail_id, cpu_time_limit, real_time_limit, chan)
-        }
+        nix::unistd::ForkResult::Child => cpu_time_observer(
+            jail_id,
+            cpu_time_limit,
+            real_time_limit,
+            chan,
+            cgroup_driver,
+        ),
         nix::unistd::ForkResult::Parent { .. } => Ok(()),
     }
 }
