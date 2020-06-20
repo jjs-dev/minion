@@ -1,4 +1,4 @@
-use crate::linux::zygote::cgroup::{detect_cgroup_version, CgroupVersion};
+use crate::linux::cgroup::CgroupVersion;
 use std::path::PathBuf;
 
 fn get_current_cgroup_path() -> Vec<String> {
@@ -78,7 +78,7 @@ fn find_lca<'a>(a: &'a [String], b: &'a [String]) -> &'a [String] {
 
 /// `crate::check()` on linux
 pub fn check() -> Result<(), String> {
-    if detect_cgroup_version() == CgroupVersion::V1 {
+    if CgroupVersion::detect() == CgroupVersion::V1 {
         if unsafe { libc::geteuid() } != 0 {
             return Err("Root is required to use legacy cgroups".to_string());
         }

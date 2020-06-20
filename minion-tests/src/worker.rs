@@ -14,7 +14,7 @@ pub fn main(test_cases: &[&'static dyn TestCase]) {
         .unwrap();
 
     let tempdir = tempfile::TempDir::new().expect("cannot create temporary dir");
-    let backend = minion::erased::setup();
+    let backend = minion::erased::setup().expect("backend creation failed");
     let opts = minion::SandboxOptions {
         cpu_time_limit: test_case.time_limit(),
         real_time_limit: test_case.real_time_limit(),

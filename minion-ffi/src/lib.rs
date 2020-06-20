@@ -17,8 +17,8 @@ pub enum ErrorCode {
     /// - something was expected to be unique, but wasn't, and so on
     /// these errors usually imply bug exists in caller code
     InvalidInput,
-    /// unknown error
-    Unknown,
+    /// Minion error
+    Minion,
 }
 
 /// Get string description of given `error_code`, returned by minion-ffi previously.
@@ -29,7 +29,7 @@ pub extern "C" fn minion_describe_status(error_code: ErrorCode) -> *const u8 {
     match error_code {
         ErrorCode::Ok => b"ok\0".as_ptr(),
         ErrorCode::InvalidInput => b"invalid input\0".as_ptr(),
-        ErrorCode::Unknown => b"unknown error\0".as_ptr(),
+        ErrorCode::Minion => b"minion error\0".as_ptr(),
     }
 }
 
@@ -69,7 +69,11 @@ pub unsafe extern "C" fn minion_lib_init() -> ErrorCode {
 #[no_mangle]
 #[must_use]
 pub extern "C" fn minion_backend_create(out: &mut *mut Backend) -> ErrorCode {
-    let backend = Backend(minion::erased::setup());
+    let backend = match minion::erased::setup() {
+        Ok(b) => b,
+        Err(_) => return ErrorCode::Minion,
+    };
+    let backend = Backend(backend);
     let backend = Box::new(backend);
     *out = Box::into_raw(backend);
     ErrorCode::Ok
@@ -119,7 +123,7 @@ pub unsafe extern "C" fn minion_sandbox_check_cpu_tle(
             }
             ErrorCode::Ok
         }
-        Err(_) => ErrorCode::Unknown,
+        Err(_) => ErrorCode::Minion,
     }
 }
 
@@ -137,7 +141,7 @@ pub unsafe extern "C" fn minion_sandbox_check_real_tle(
             }
             ErrorCode::Ok
         }
-        Err(_) => ErrorCode::Unknown,
+        Err(_) => ErrorCode::Minion,
     }
 }
 
@@ -145,7 +149,7 @@ pub unsafe extern "C" fn minion_sandbox_check_real_tle(
 pub extern "C" fn minion_sandbox_kill(sandbox: &Sandbox) -> ErrorCode {
     match sandbox.0.kill() {
         Ok(_) => ErrorCode::Ok,
-        Err(_) => ErrorCode::Unknown,
+        Err(_) => ErrorCode::Minion,
     }
 }
 
@@ -352,7 +356,7 @@ pub unsafe extern "C" fn minion_cp_wait(
             }
             ErrorCode::Ok
         }
-        Result::Err(_) => ErrorCode::Unknown,
+        Result::Err(_) => ErrorCode::Minion,
     }
 }
 
@@ -389,7 +393,7 @@ pub unsafe extern "C" fn minion_cp_exitcode(
             }
             ErrorCode::Ok
         }
-        Result::Err(_) => ErrorCode::Unknown,
+        Result::Err(_) => ErrorCode::Minion,
     }
 }
 

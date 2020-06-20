@@ -3,14 +3,13 @@
 //! In particular, zygote is namespace root.
 //! Zygote accepts queries for spawning child process
 
-pub(in crate::linux) mod cgroup;
 mod main_loop;
 mod setup;
 
 use crate::linux::{
     jail_common::{self, JailOptions},
     pipe::setup_pipe,
-    util::{duplicate_string, err_exit, ExitCode, Handle, IpcSocketExt, Pid, Uid},
+    util::{duplicate_string, err_exit, ExitCode, Fd, IpcSocketExt, Pid, Uid},
 };
 use libc::{c_char, c_void};
 use nix::sys::time::TimeValLike;
@@ -31,13 +30,13 @@ use setup::SetupData;
 const SANDBOX_INTERNAL_UID: Uid = 179;
 
 struct Stdio {
-    stdin: Handle,
-    stdout: Handle,
-    stderr: Handle,
+    stdin: Fd,
+    stdout: Fd,
+    stderr: Fd,
 }
 
 impl Stdio {
-    fn from_fd_array(fds: [Handle; 3]) -> Stdio {
+    fn from_fd_array(fds: [Fd; 3]) -> Stdio {
         Stdio {
             stdin: fds[0],
             stdout: fds[1],
@@ -60,9 +59,10 @@ struct JobOptions {
     pwd: OsString,
 }
 
-pub(crate) struct ZygoteOptions {
+pub(crate) struct ZygoteOptions<'a> {
     jail_options: JailOptions,
     sock: Socket,
+    cgroup_driver: &'a crate::linux::cgroup::Driver,
 }
 
 struct DoExecArg<'a> {
@@ -72,7 +72,7 @@ struct DoExecArg<'a> {
     stdio: Stdio,
     sock: Socket,
     pwd: &'a OsStr,
-    cgroups_tasks: &'a cgroup::Group,
+    join_handle: &'a crate::linux::cgroup::JoinHandle,
     jail_id: &'a str,
 }
 
@@ -152,7 +152,7 @@ extern "C" fn do_exec(mut arg: DoExecArg) -> ! {
         // Join cgroups.
         // This doesn't require any additional capablities, because we just write some stuff
         // to preopened handle.
-        arg.cgroups_tasks.join_self();
+        arg.join_handle.join_self();
 
         // Now we need mark all FDs as CLOEXEC for not to expose them to sandboxed process
         let fd_list;
@@ -163,7 +163,7 @@ extern "C" fn do_exec(mut arg: DoExecArg) -> ! {
         for fd in fd_list {
             let fd = fd.expect("failed to get fd entry metadata");
             let fd = fd.file_name().to_string_lossy().to_string();
-            let fd: Handle = fd
+            let fd: Fd = fd
                 .parse()
                 .expect("/proc/self/fd member file name is not fd");
             if -1 == libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) {
@@ -250,7 +250,7 @@ fn spawn_job(
         stdio: options.stdio,
         sock: child_sock,
         pwd: &options.pwd,
-        cgroups_tasks: &setup_data.cgroups,
+        join_handle: &setup_data.cgroup_join_handle,
         jail_id: &jail_id,
     };
     let res = nix::unistd::fork()?;
@@ -274,7 +274,7 @@ const WM_CLASS_PID_MAP_READY_FOR_SETUP: &[u8] = b"WM_SETUP_READY";
 const WM_CLASS_PID_MAP_CREATED: &[u8] = b"WM_PIDMAP_DONE";
 
 struct WaiterArg {
-    res_fd: Handle,
+    res_fd: Fd,
     pid: Pid,
 }
 
@@ -369,8 +369,9 @@ fn timed_wait(pid: Pid, timeout: Option<time::Duration>) -> crate::Result<Option
     Ok(ret)
 }
 
-pub(crate) fn start_zygote(
+pub(in crate::linux) fn start_zygote(
     jail_options: JailOptions,
+    cgroup_driver: &crate::linux::cgroup::Driver,
 ) -> crate::Result<jail_common::ZygoteStartupInfo> {
     let (socket, zyg_sock) = Socket::new_socketpair().unwrap();
 
@@ -382,12 +383,18 @@ pub(crate) fn start_zygote(
             // why we use unshare(PID) here, and not in setup_namespace()? See pid_namespaces(7) and unshare(2)
             let unshare_ns = nix::sched::CloneFlags::CLONE_NEWUSER
                 | nix::sched::CloneFlags::CLONE_NEWPID
-                | nix::sched::CloneFlags::CLONE_NEWNS
                 | nix::sched::CloneFlags::CLONE_NEWNET;
             nix::sched::unshare(unshare_ns)?;
+            nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS).or_else(|err| {
+                if jail_options.allow_mount_ns_failure {
+                    Ok(())
+                } else {
+                    Err(err)
+                }
+            })?;
             match nix::unistd::fork()? {
                 nix::unistd::ForkResult::Child => {
-                    start_zygote_main_process(jail_options, socket, zyg_sock)
+                    start_zygote_main_process(jail_options, socket, zyg_sock, cgroup_driver)
                 }
                 nix::unistd::ForkResult::Parent { child } => start_zygote_initialization_helper(
                     zyg_sock,
@@ -408,8 +415,8 @@ pub(crate) fn start_zygote(
 
 /// Thread A it is thread that entered start_zygote() normally, returns from function
 fn start_zygote_caller(
-    return_allowed_r: Handle,
-    return_allowed_w: Handle,
+    return_allowed_r: Fd,
+    return_allowed_w: Fd,
     jail_options: JailOptions,
     socket: Socket,
 ) -> crate::Result<ZygoteStartupInfo> {
@@ -437,7 +444,7 @@ fn start_zygote_initialization_helper(
     child_pid: Pid,
     jail_options: JailOptions,
     mut socket: Socket,
-    return_allowed_w: Handle,
+    return_allowed_w: Fd,
     sandbox_uid: u32,
 ) -> Result<std::convert::Infallible, crate::Error> {
     let mut logger = crate::linux::util::strace_logger();
@@ -470,7 +477,12 @@ fn start_zygote_initialization_helper(
 }
 
 /// Thread C is zygote main process
-fn start_zygote_main_process(jail_options: JailOptions, socket: Socket, zyg_sock: Socket) -> ! {
+fn start_zygote_main_process(
+    jail_options: JailOptions,
+    socket: Socket,
+    zyg_sock: Socket,
+    cgroup_driver: &crate::linux::cgroup::Driver,
+) -> ! {
     let mut logger = crate::linux::util::strace_logger();
     write!(
         logger,
@@ -482,8 +494,10 @@ fn start_zygote_main_process(jail_options: JailOptions, socket: Socket, zyg_sock
     let zyg_opts = ZygoteOptions {
         jail_options,
         sock: zyg_sock,
+        cgroup_driver,
     };
     let zygote_ret_code = main_loop::zygote_entry(zyg_opts);
+
     unsafe {
         libc::exit(zygote_ret_code.unwrap_or(1));
     }

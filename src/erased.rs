@@ -132,6 +132,8 @@ impl<B: crate::Backend> Backend for B {
 pub type ChildProcessOptions = crate::ChildProcessOptions<Box<dyn Sandbox>>;
 
 /// Returns backend instance
-pub fn setup() -> Box<dyn Backend> {
-    Box::new(crate::linux::LinuxBackend::new())
+pub fn setup() -> crate::Result<Box<dyn Backend>> {
+    Ok(Box::new(crate::linux::LinuxBackend::new(
+        crate::linux::Settings::new(),
+    )?))
 }
