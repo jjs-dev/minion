@@ -132,7 +132,7 @@ fn print_diagnostics(path: &OsStr, out: &mut dyn Write) {
     }
 }
 
-extern "C" fn do_exec(mut arg: DoExecArg) -> ! {
+fn do_exec(mut arg: DoExecArg) -> ! {
     use std::os::unix::io::FromRawFd;
     unsafe {
         let stderr_fd = libc::dup(2);
@@ -324,14 +324,10 @@ fn timed_wait(pid: Pid, timeout: Option<time::Duration>) -> crate::Result<Option
     }
     // TL&DR - select([ready_r], timeout)
     let mut poll_fd_info = [nix::poll::PollFd::new(end_r, nix::poll::PollFlags::POLLIN)];
-    let timeout = match timeout {
-        Some(timeout) => {
-            nix::sys::time::TimeSpec::nanoseconds(timeout.subsec_nanos() as i64)
-                + nix::sys::time::TimeSpec::seconds(timeout.as_secs() as i64)
-        }
-        // TODO fix `ppoll` in nix
-        None => nix::sys::time::TimeSpec::seconds(1_000_000_000),
-    };
+    let timeout = timeout.map(|timeout| {
+        nix::sys::time::TimeSpec::nanoseconds(timeout.subsec_nanos() as i64)
+            + nix::sys::time::TimeSpec::seconds(timeout.as_secs() as i64)
+    });
     let ret = loop {
         let poll_ret = nix::poll::ppoll(
             &mut poll_fd_info[..],
