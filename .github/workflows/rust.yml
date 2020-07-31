@@ -101,6 +101,35 @@ jobs:
           path: /tmp/logs
           name: tests-trace-${{ matrix.cgroups }}-${{ matrix.os }}
 
+  tests-windows:
+    strategy:
+      matrix:
+        rust-target:
+          - 'x86_64-pc-windows-gnu'
+          - 'x86_64-pc-windows-msvc'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1.0.6
+        with: 
+          toolchain: stable
+          override: true
+      - name: Test
+        run: powershell ci/windows.ps1
+        timeout-minutes: 5
+        env:
+          CI_TARGET: ${{ matrix.rust-target }}
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir /tmp/logs
+          cp ./strace* /tmp/logs
+      - uses: actions/upload-artifact@v1
+        if: always()
+        with:
+          path: /tmp/logs
+          name: tests-trace
+
   nightly-checks:
     runs-on: ubuntu-20.04
     steps:

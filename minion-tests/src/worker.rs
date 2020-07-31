@@ -58,6 +58,7 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
 }
 
 pub fn main(test_cases: &[&'static dyn TestCase]) {
+    tracing_subscriber::fmt().pretty().init();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

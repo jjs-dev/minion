@@ -12,10 +12,14 @@ mod command;
 #[cfg(target_os = "linux")]
 pub mod linux;
 
+#[cfg(target_os = "windows")]
+pub mod windows;
+
 pub mod erased;
 
 mod check;
 pub use check::{check, CheckResult};
+mod util;
 
 use serde::{Deserialize, Serialize};
 
@@ -94,7 +98,8 @@ pub struct SandboxOptions {
 }
 
 impl SandboxOptions {
-    fn make_relative<'a>(&self, p: &'a Path) -> &'a Path {
+    #[cfg(target_os = "linux")]
+    fn make_relative<'a>(&self, p: &'a std::path::Path) -> &'a std::path::Path {
         if p.starts_with("/") {
             p.strip_prefix("/").unwrap()
         } else {
@@ -102,6 +107,7 @@ impl SandboxOptions {
         }
     }
 
+    #[cfg(target_os = "linux")]
     fn postprocess(&mut self) {
         let mut paths = std::mem::replace(&mut self.shared_items, Vec::new());
         for x in &mut paths {
@@ -114,7 +120,7 @@ impl SandboxOptions {
 /// Represents highly-isolated sandbox
 pub trait Sandbox: Debug + Send + Sync + 'static {
     type Error: StdError + Send + Sync + 'static;
-    fn id(&self) -> String;
+    fn id(&self) -> &str;
 
     /// Returns true if sandbox exceeded CPU time limit
     fn check_cpu_tle(&self) -> Result<bool, Self::Error>;
@@ -164,8 +170,16 @@ impl InputSpecification {
 
     /// # Correctness
     /// See requirements of `handle`
+    #[cfg(target_os = "linux")]
     pub fn handle_of<T: std::os::unix::io::IntoRawFd>(obj: T) -> Self {
         Self::handle(obj.into_raw_fd() as u64)
+    }
+
+    /// # Safety
+    /// See requirements of `handle`
+    #[cfg(target_os = "windows")]
+    pub unsafe fn handle_of<T: std::os::windows::io::IntoRawHandle>(obj: T) -> Self {
+        unsafe { Self::handle(obj.into_raw_handle() as u64) }
     }
 }
 
@@ -209,8 +223,16 @@ impl OutputSpecification {
 
     /// # Correctness
     /// See requirements of `handle`
+    #[cfg(target_os = "linux")]
     pub fn handle_of<T: std::os::unix::io::IntoRawFd>(obj: T) -> Self {
         Self::handle(obj.into_raw_fd() as u64)
+    }
+
+    /// # Safety
+    /// See requirements of `handle`
+    #[cfg(target_os = "windows")]
+    pub unsafe fn handle_of<T: std::os::windows::io::IntoRawHandle>(obj: T) -> Self {
+        unsafe { Self::handle(obj.into_raw_handle() as u64) }
     }
 }
 
@@ -238,10 +260,7 @@ pub struct ChildProcessOptions<Sandbox: ?Sized> {
     pub pwd: PathBuf,
 }
 
-use std::{
-    ffi::OsString,
-    path::{Path, PathBuf},
-};
+use std::{ffi::OsString, path::PathBuf};
 
 /// Child process exit code.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

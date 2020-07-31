@@ -50,8 +50,18 @@ impl crate::TestCase for TTlFork {
         (TODO: verify this is not wall-clock time limit)"
     }
     fn test(&self) -> ! {
+        #[cfg(target_os = "linux")]
+        nix::unistd::fork().unwrap();
+        #[cfg(target_os = "winfows")]
         unsafe {
-            nix::unistd::fork().unwrap();
+            winapi::um::processthreadsapi::CreateThread(
+                std::ptr::null_mut(),
+                0,
+                exceed_time_limit,
+                self,
+                0,
+                std::ptr::null_mut(),
+            );
         }
         exceed_time_limit()
     }
@@ -73,7 +83,12 @@ impl crate::TestCase for TIdle {
         checks that it still will be killed"
     }
     fn test(&self) -> ! {
+        #[cfg(target_os = "linux")]
         nix::unistd::sleep(1_000_000_000);
+        #[cfg(target_os = "windows")]
+        unsafe {
+            winapi::um::synchapi::Sleep(1_000_000_000);
+        };
         std::process::exit(0)
     }
     fn check(&self, cp: crate::CompletedChild, _: &dyn Sandbox) {
@@ -149,6 +164,7 @@ impl crate::TestCase for TSecurity {
     fn description(&self) -> &'static str {
         "verifies that isolated program can not make certain bad things"
     }
+    #[cfg(target_os = "linux")]
     fn test(&self) -> ! {
         // Check we can not read pid1's environment.
         let err = std::fs::read("/proc/1/environ").unwrap_err();
@@ -166,6 +182,12 @@ impl crate::TestCase for TSecurity {
         assert!(matches!(err, nix::Error::Sys(nix::errno::Errno::EPERM)));
         std::process::exit(24)
     }
+
+    #[cfg(target_os = "windows")]
+    fn test(&self) -> ! {
+        std::process::exit(24)
+    }
+
     fn check(&self, mut cp: crate::CompletedChild, _sb: &dyn Sandbox) {
         super::assert_exit_code(cp.by_ref(), minion::ExitCode(24));
         super::assert_empty(cp.stdout);

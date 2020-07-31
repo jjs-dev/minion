@@ -153,7 +153,7 @@ impl LinuxSandbox {
         settings: &crate::linux::Settings,
         cgroup_driver: Arc<crate::linux::cgroup::Driver>,
     ) -> Result<LinuxSandbox, Error> {
-        let jail_id = jail_common::gen_jail_id();
+        let jail_id = crate::util::gen_jail_id();
         let mut read_end = 0;
         let mut write_end = 0;
         setup_pipe(&mut read_end, &mut write_end)?;
