@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 pub use crate::linux::{LinuxBackend, LinuxChildProcess, LinuxSandbox};
 
 use std::{
+    error::Error as StdError,
     fmt::Debug,
     io::{Read, Write},
     time::Duration,
@@ -42,10 +43,14 @@ pub fn check() -> Option<String> {
 
 /// Represents way of isolation
 pub trait Backend: Debug + Send + Sync {
-    type Sandbox: Sandbox;
-    type ChildProcess: ChildProcess;
-    fn new_sandbox(&self, options: SandboxOptions) -> Result<Self::Sandbox>;
-    fn spawn(&self, options: ChildProcessOptions<Self::Sandbox>) -> Result<Self::ChildProcess>;
+    type Error: StdError + Send + Sync + 'static;
+    type Sandbox: Sandbox<Error = Self::Error>;
+    type ChildProcess: ChildProcess<Error = Self::Error>;
+    fn new_sandbox(&self, options: SandboxOptions) -> Result<Self::Sandbox, Self::Error>;
+    fn spawn(
+        &self,
+        options: ChildProcessOptions<Self::Sandbox>,
+    ) -> Result<Self::ChildProcess, Self::Error>;
 }
 
 pub use command::Command;
@@ -116,20 +121,21 @@ impl SandboxOptions {
 
 /// Represents highly-isolated sandbox
 pub trait Sandbox: Clone + Debug + 'static {
+    type Error: StdError + Send + Sync + 'static;
     fn id(&self) -> String;
 
     /// Returns true if sandbox exceeded CPU time limit
-    fn check_cpu_tle(&self) -> Result<bool>;
+    fn check_cpu_tle(&self) -> Result<bool, Self::Error>;
 
     /// Returns true if sandbox exceeded wall-clock time limit
-    fn check_real_tle(&self) -> Result<bool>;
+    fn check_real_tle(&self) -> Result<bool, Self::Error>;
 
     /// Kills all processes in sandbox.
     /// Probably, subsequent `spawn` requests will fail.
-    fn kill(&self) -> Result<()>;
+    fn kill(&self) -> Result<(), Self::Error>;
 
     /// Returns information about resource usage by total sandbox
-    fn resource_usage(&self) -> Result<ResourceUsageData>;
+    fn resource_usage(&self) -> Result<ResourceUsageData, Self::Error>;
 }
 
 /// Configures stdin for child
@@ -240,71 +246,10 @@ pub struct ChildProcessOptions<Sandbox> {
     pub pwd: PathBuf,
 }
 
-mod errors {
-    #[derive(Eq, PartialEq)]
-    pub enum ErrorKind {
-        /// This error typically means that isolated process tried to break its sandbox
-        Sandbox,
-        /// Bug in code, using minion, or in minion itself
-        System,
-    }
-
-    #[derive(Debug, thiserror::Error)]
-    #[non_exhaustive]
-    pub enum Error {
-        #[error("requested operation is not supported by backend")]
-        NotSupported,
-        #[error("system call failed in undesired fashion (error code {})", code)]
-        Syscall { code: i32 },
-        #[error("io error")]
-        Io {
-            #[from]
-            source: std::io::Error,
-        },
-        #[error("sandbox interaction failed")]
-        Sandbox,
-        #[error("unknown error")]
-        Unknown,
-    }
-
-    impl Error {
-        pub fn kind(&self) -> ErrorKind {
-            match self {
-                Error::NotSupported => ErrorKind::System,
-                Error::Syscall { .. } => ErrorKind::System,
-                Error::Io { .. } => ErrorKind::System,
-                Error::Sandbox => ErrorKind::Sandbox,
-                Error::Unknown => ErrorKind::System,
-            }
-        }
-
-        pub fn is_system(&self) -> bool {
-            self.kind() == ErrorKind::System
-        }
-
-        pub fn is_sandbox(&self) -> bool {
-            self.kind() == ErrorKind::Sandbox
-        }
-    }
-
-    impl From<nix::Error> for Error {
-        fn from(err: nix::Error) -> Self {
-            if let Some(errno) = err.as_errno() {
-                Error::Syscall { code: errno as i32 }
-            } else {
-                Error::Unknown
-            }
-        }
-    }
-}
-
-pub use errors::Error;
 use std::{
     ffi::OsString,
     path::{Path, PathBuf},
 };
-
-pub type Result<T> = std::result::Result<T, Error>;
 
 /// May be returned when process was killed
 pub const EXIT_CODE_KILLED: i64 = 0x7eaddeadbeeff00d;
@@ -324,12 +269,13 @@ pub enum WaitOutcome {
 
 /// Represents child process.
 pub trait ChildProcess: Debug + 'static {
+    type Error: StdError + Send + Sync + 'static;
     /// Represents pipe from current process to isolated
     type PipeIn: Write + Send + Sync + 'static;
     /// Represents pipe from isolated process to current
     type PipeOut: Read + Send + Sync + 'static;
     /// Returns exit code, if process had exited by the moment of call, or None otherwise.
-    fn get_exit_code(&self) -> Result<Option<i64>>;
+    fn get_exit_code(&self) -> Result<Option<i64>, Self::Error>;
 
     /// Returns writeable stream, connected to child stdin
     ///
@@ -358,12 +304,12 @@ pub trait ChildProcess: Debug + 'static {
 
     /// Waits for child process exit with timeout.
     /// If timeout is None, `wait_for_exit` will block until child has exited
-    fn wait_for_exit(&self, timeout: Option<Duration>) -> Result<WaitOutcome>;
+    fn wait_for_exit(&self, timeout: Option<Duration>) -> Result<WaitOutcome, Self::Error>;
 
     /// Refreshes information about process
-    fn poll(&self) -> Result<()>;
+    fn poll(&self) -> Result<(), Self::Error>;
 
     /// Returns whether child process has exited by the moment of call
     /// This function doesn't blocks on waiting (see `wait_for_exit`).
-    fn is_finished(&self) -> Result<bool>;
+    fn is_finished(&self) -> Result<bool, Self::Error>;
 }

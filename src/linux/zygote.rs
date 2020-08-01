@@ -10,6 +10,7 @@ use crate::linux::{
     jail_common::{self, JailOptions},
     pipe::setup_pipe,
     util::{duplicate_string, err_exit, ExitCode, Fd, IpcSocketExt, Pid, Uid},
+    Error,
 };
 use libc::{c_char, c_void};
 use nix::sys::time::TimeValLike;
@@ -237,7 +238,7 @@ fn spawn_job(
     options: JobOptions,
     setup_data: &SetupData,
     jail_id: String,
-) -> crate::Result<jail_common::JobStartupInfo> {
+) -> Result<jail_common::JobStartupInfo, Error> {
     let (mut sock, mut child_sock) = Socket::new_socketpair().unwrap();
     child_sock
         .no_cloexec()
@@ -299,7 +300,7 @@ extern "C" fn timed_wait_waiter(arg: *mut c_void) -> *mut c_void {
     }
 }
 
-fn timed_wait(pid: Pid, timeout: Option<time::Duration>) -> crate::Result<Option<ExitCode>> {
+fn timed_wait(pid: Pid, timeout: Option<time::Duration>) -> Result<Option<ExitCode>, Error> {
     let (mut end_r, mut end_w);
     end_r = 0;
     end_w = 0;
@@ -340,7 +341,7 @@ fn timed_wait(pid: Pid, timeout: Option<time::Duration>) -> crate::Result<Option
                 if sys_err == libc::EINTR {
                     continue;
                 }
-                return Err(crate::Error::Syscall { code: sys_err });
+                return Err(Error::Syscall { code: sys_err });
             }
             Ok(0) => None,
             Ok(1) => {
@@ -368,7 +369,7 @@ fn timed_wait(pid: Pid, timeout: Option<time::Duration>) -> crate::Result<Option
 pub(in crate::linux) fn start_zygote(
     jail_options: JailOptions,
     cgroup_driver: &crate::linux::cgroup::Driver,
-) -> crate::Result<jail_common::ZygoteStartupInfo> {
+) -> Result<jail_common::ZygoteStartupInfo, Error> {
     let (socket, zyg_sock) = Socket::new_socketpair().unwrap();
 
     let (return_allowed_r, return_allowed_w) = nix::unistd::pipe().expect("couldn't create pipe");
@@ -415,7 +416,7 @@ fn start_zygote_caller(
     return_allowed_w: Fd,
     jail_options: JailOptions,
     socket: Socket,
-) -> crate::Result<ZygoteStartupInfo> {
+) -> Result<ZygoteStartupInfo, Error> {
     let mut logger = crate::linux::util::strace_logger();
     write!(logger, "sandbox {}: thread A (main)", &jail_options.jail_id).unwrap();
 
@@ -442,7 +443,7 @@ fn start_zygote_initialization_helper(
     mut socket: Socket,
     return_allowed_w: Fd,
     sandbox_uid: u32,
-) -> Result<std::convert::Infallible, crate::Error> {
+) -> Result<std::convert::Infallible, Error> {
     let mut logger = crate::linux::util::strace_logger();
     write!(
         logger,

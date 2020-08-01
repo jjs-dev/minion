@@ -49,7 +49,7 @@ impl Command {
     pub fn spawn(
         &self,
         backend: &dyn erased::Backend,
-    ) -> crate::Result<Box<dyn erased::ChildProcess>> {
+    ) -> anyhow::Result<Box<dyn erased::ChildProcess>> {
         let options = self
             .build()
             .expect("spawn() was requested, but required fields were not set");

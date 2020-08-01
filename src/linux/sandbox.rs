@@ -3,7 +3,7 @@ use crate::{
         jail_common,
         pipe::setup_pipe,
         util::{ExitCode, Fd, IpcSocketExt, Pid},
-        zygote,
+        zygote, Error,
     },
     Sandbox, SandboxOptions,
 };
@@ -29,7 +29,7 @@ struct SandboxState {
 }
 
 impl SandboxState {
-    fn process_flag(&self, ch: u8) -> crate::Result<()> {
+    fn process_flag(&self, ch: u8) -> Result<(), Error> {
         match ch {
             b'c' => {
                 self.was_cpu_tle.store(true, SeqCst);
@@ -37,7 +37,7 @@ impl SandboxState {
             b'r' => {
                 self.was_wall_tle.store(true, SeqCst);
             }
-            _ => return Err(crate::Error::Sandbox),
+            _ => return Err(Error::Sandbox),
         }
         Ok(())
     }
@@ -90,27 +90,29 @@ impl Debug for LinuxSandbox {
 }
 
 impl Sandbox for LinuxSandbox {
+    type Error = Error;
+
     fn id(&self) -> String {
         self.0.id.clone()
     }
 
-    fn check_cpu_tle(&self) -> crate::Result<bool> {
+    fn check_cpu_tle(&self) -> Result<bool, Error> {
         self.poll_state()?;
         Ok(self.0.state.was_cpu_tle.load(SeqCst))
     }
 
-    fn check_real_tle(&self) -> crate::Result<bool> {
+    fn check_real_tle(&self) -> Result<bool, Error> {
         self.poll_state()?;
         Ok(self.0.state.was_wall_tle.load(SeqCst))
     }
 
-    fn kill(&self) -> crate::Result<()> {
+    fn kill(&self) -> Result<(), Error> {
         jail_common::kill_sandbox(self.0.zygote_pid, &self.0.id, &self.0.cgroup_driver)
-            .map_err(|err| crate::Error::Io { source: err })?;
+            .map_err(|err| Error::Io { source: err })?;
         Ok(())
     }
 
-    fn resource_usage(&self) -> crate::Result<crate::ResourceUsageData> {
+    fn resource_usage(&self) -> Result<crate::ResourceUsageData, Error> {
         let cpu_usage = self.0.cgroup_driver.get_cpu_usage(&self.0.id);
         let memory_usage = self.0.cgroup_driver.get_memory_usage(&self.0.id);
         Ok(crate::ResourceUsageData {
@@ -128,7 +130,7 @@ pub(crate) struct ExtendedJobQuery {
 }
 
 impl LinuxSandbox {
-    fn poll_state(&self) -> crate::Result<()> {
+    fn poll_state(&self) -> Result<(), Error> {
         for _ in 0..5 {
             let mut buf = [0; 4];
             let num_read = nix::unistd::read(self.0.watchdog_chan, &mut buf).or_else(|err| {
@@ -154,7 +156,7 @@ impl LinuxSandbox {
         options: SandboxOptions,
         settings: &crate::linux::Settings,
         cgroup_driver: Arc<crate::linux::cgroup::Driver>,
-    ) -> crate::Result<LinuxSandbox> {
+    ) -> Result<LinuxSandbox, Error> {
         let jail_id = jail_common::gen_jail_id();
         let mut read_end = 0;
         let mut write_end = 0;
