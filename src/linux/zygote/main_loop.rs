@@ -2,6 +2,7 @@ use crate::linux::{
     jail_common::{JobQuery, Query},
     util::{Fd, IpcSocketExt, Pid, StraceLogger},
     zygote::{setup, spawn_job, JobOptions, SetupData, Stdio, ZygoteOptions},
+    Error,
 };
 use std::{io::Write, time::Duration};
 
@@ -9,7 +10,7 @@ fn process_spawn_query(
     arg: &mut ZygoteOptions,
     options: &JobQuery,
     setup_data: &SetupData,
-) -> crate::Result<()> {
+) -> Result<(), Error> {
     let mut logger = StraceLogger::new();
     writeln!(logger, "got Spawn request").ok();
     // Now we do some preprocessing.
@@ -43,7 +44,7 @@ fn process_poll_query(
     arg: &mut ZygoteOptions,
     pid: Pid,
     timeout: Option<Duration>,
-) -> crate::Result<()> {
+) -> Result<(), Error> {
     let res = super::timed_wait(pid, timeout)?;
     arg.sock.send(&res)?;
     Ok(())
@@ -51,7 +52,7 @@ fn process_poll_query(
 const RETURN_CODE_OK: i32 = 0;
 const RETURN_CODE_BAD_QUERY: i32 = 0xBAD;
 
-pub(crate) fn zygote_entry(mut arg: ZygoteOptions) -> crate::Result<i32> {
+pub(crate) fn zygote_entry(mut arg: ZygoteOptions) -> Result<i32, Error> {
     let setup_data = setup::setup(&arg.jail_options, &mut arg.sock, arg.cgroup_driver)?;
 
     let mut logger = StraceLogger::new();

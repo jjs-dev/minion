@@ -70,7 +70,9 @@ pub(in crate::linux) struct ResourceLimits {
 }
 
 impl Driver {
-    pub(in crate::linux) fn new(settings: &crate::linux::Settings) -> crate::Result<Driver> {
+    pub(in crate::linux) fn new(
+        settings: &crate::linux::Settings,
+    ) -> Result<Driver, crate::linux::Error> {
         let cgroup_version = detect::CgroupVersion::detect();
         let mut cgroup_prefix = Vec::new();
         for comp in settings.cgroup_prefix.components() {

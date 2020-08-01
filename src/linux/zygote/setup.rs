@@ -6,6 +6,7 @@ use crate::{
             SANDBOX_INTERNAL_UID, WM_CLASS_PID_MAP_CREATED, WM_CLASS_PID_MAP_READY_FOR_SETUP,
             WM_CLASS_SETUP_FINISHED,
         },
+        Error,
     },
     SharedDir, SharedDirKind,
 };
@@ -16,7 +17,7 @@ pub(in crate::linux) struct SetupData {
     pub(in crate::linux) cgroup_join_handle: crate::linux::cgroup::JoinHandle,
 }
 
-fn configure_dir(dir_path: &Path) -> crate::Result<()> {
+fn configure_dir(dir_path: &Path) -> Result<(), Error> {
     use nix::sys::stat::Mode;
     let mode = Mode::S_IRUSR
         | Mode::S_IWUSR
@@ -121,14 +122,14 @@ fn setup_sighandler() {
     }
 }
 
-fn setup_chroot(jail_options: &JailOptions) -> crate::Result<()> {
+fn setup_chroot(jail_options: &JailOptions) -> Result<(), Error> {
     let path = &jail_options.isolation_root;
     nix::unistd::chroot(path)?;
     nix::unistd::chdir("/")?;
     Ok(())
 }
 
-fn setup_procfs(jail_options: &JailOptions) -> crate::Result<()> {
+fn setup_procfs(jail_options: &JailOptions) -> Result<(), Error> {
     let procfs_path = jail_options.isolation_root.join(Path::new("proc"));
     match fs::create_dir(&procfs_path) {
         Ok(_) => (),
@@ -147,7 +148,7 @@ fn setup_procfs(jail_options: &JailOptions) -> crate::Result<()> {
     Ok(())
 }
 
-fn setup_uid_mapping(sock: &mut Socket) -> crate::Result<()> {
+fn setup_uid_mapping(sock: &mut Socket) -> Result<(), Error> {
     sock.wake(WM_CLASS_PID_MAP_READY_FOR_SETUP)?;
     sock.lock(WM_CLASS_PID_MAP_CREATED)?;
     Ok(())
@@ -156,7 +157,7 @@ fn setup_uid_mapping(sock: &mut Socket) -> crate::Result<()> {
 fn setup_time_watch(
     jail_options: &JailOptions,
     cgroup_driver: &crate::linux::cgroup::Driver,
-) -> crate::Result<()> {
+) -> Result<(), Error> {
     let cpu_tl = jail_options.cpu_time_limit.as_nanos() as u64;
     let real_tl = jail_options.real_time_limit.as_nanos() as u64;
     observe_time(
@@ -195,7 +196,7 @@ pub(in crate::linux) fn setup(
     jail_params: &JailOptions,
     sock: &mut Socket,
     cgroup_driver: &crate::linux::cgroup::Driver,
-) -> crate::Result<SetupData> {
+) -> Result<SetupData, Error> {
     setup_panic_hook();
     setup_sighandler();
     // must be done before `configure_dir`.
@@ -265,7 +266,7 @@ fn observe_time(
     real_time_limit: u64,
     chan: Fd,
     cgroup_driver: &crate::linux::cgroup::Driver,
-) -> crate::Result<()> {
+) -> Result<(), Error> {
     let fret = nix::unistd::fork()?;
 
     match fret {

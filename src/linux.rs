@@ -1,5 +1,6 @@
 mod cgroup;
 pub mod check;
+pub mod error;
 pub mod ext;
 mod jail_common;
 mod pipe;
@@ -7,7 +8,6 @@ mod sandbox;
 mod util;
 mod zygote;
 
-pub use crate::linux::sandbox::LinuxSandbox;
 use crate::{
     linux::{
         pipe::{LinuxReadPipe, LinuxWritePipe},
@@ -16,7 +16,9 @@ use crate::{
     Backend, ChildProcess, ChildProcessOptions, InputSpecification, InputSpecificationData,
     OutputSpecification, OutputSpecificationData, SandboxOptions, WaitOutcome,
 };
+pub use error::Error;
 use nix::sys::memfd;
+pub use sandbox::LinuxSandbox;
 use std::{
     ffi::CString,
     fs,
@@ -52,9 +54,10 @@ impl std::fmt::Debug for LinuxChildProcess {
 const EXIT_CODE_STILL_RUNNING: i64 = i64::min_value();
 
 impl ChildProcess for LinuxChildProcess {
+    type Error = Error;
     type PipeIn = LinuxWritePipe;
     type PipeOut = LinuxReadPipe;
-    fn get_exit_code(&self) -> crate::Result<Option<i64>> {
+    fn get_exit_code(&self) -> Result<Option<i64>, Error> {
         self.poll()?;
         let ec = self.exit_code.load(Ordering::SeqCst);
         let ec = match ec {
@@ -76,7 +79,7 @@ impl ChildProcess for LinuxChildProcess {
         self.stderr.take()
     }
 
-    fn wait_for_exit(&self, timeout: Option<std::time::Duration>) -> crate::Result<WaitOutcome> {
+    fn wait_for_exit(&self, timeout: Option<std::time::Duration>) -> Result<WaitOutcome, Error> {
         if self.exit_code.load(Ordering::SeqCst) != EXIT_CODE_STILL_RUNNING {
             return Ok(WaitOutcome::AlreadyFinished);
         }
@@ -90,18 +93,18 @@ impl ChildProcess for LinuxChildProcess {
         }
     }
 
-    fn poll(&self) -> crate::Result<()> {
+    fn poll(&self) -> Result<(), Error> {
         self.wait_for_exit(Some(Duration::from_nanos(1)))
             .map(|_w| ())
     }
 
-    fn is_finished(&self) -> crate::Result<bool> {
+    fn is_finished(&self) -> Result<bool, Error> {
         self.poll()?;
         Ok(self.exit_code.load(Ordering::SeqCst) != EXIT_CODE_STILL_RUNNING)
     }
 }
 
-fn handle_input_io(spec: InputSpecification) -> crate::Result<(Option<Fd>, Fd)> {
+fn handle_input_io(spec: InputSpecification) -> Result<(Option<Fd>, Fd), Error> {
     match spec.0 {
         InputSpecificationData::Pipe => {
             let mut h_read = 0;
@@ -124,7 +127,7 @@ fn handle_input_io(spec: InputSpecification) -> crate::Result<(Option<Fd>, Fd)> 
     }
 }
 
-fn handle_output_io(spec: OutputSpecification) -> crate::Result<(Option<Fd>, Fd)> {
+fn handle_output_io(spec: OutputSpecification) -> Result<(Option<Fd>, Fd), Error> {
     match spec.0 {
         OutputSpecificationData::Null => Ok((None, -1 as Fd)),
         OutputSpecificationData::Handle(rh) => Ok((None, rh as Fd)),
@@ -152,7 +155,7 @@ fn handle_output_io(spec: OutputSpecification) -> crate::Result<(Option<Fd>, Fd)
             let mfd = memfd::memfd_create(&memfd_name, flags).unwrap();
             if let Some(sz) = sz {
                 if unsafe { libc::ftruncate(mfd, sz as i64) } == -1 {
-                    return Err(crate::Error::Syscall {
+                    return Err(Error::Syscall {
                         code: get_last_error(),
                     });
                 }
@@ -163,7 +166,7 @@ fn handle_output_io(spec: OutputSpecification) -> crate::Result<(Option<Fd>, Fd)
     }
 }
 
-fn spawn(mut options: ChildProcessOptions<LinuxSandbox>) -> crate::Result<LinuxChildProcess> {
+fn spawn(mut options: ChildProcessOptions<LinuxSandbox>) -> Result<LinuxChildProcess, Error> {
     unsafe {
         let q = jail_common::JobQuery {
             image_path: options.path.clone(),
@@ -195,7 +198,7 @@ fn spawn(mut options: ChildProcessOptions<LinuxSandbox>) -> crate::Result<LinuxC
 
         let ret = match spawn_result {
             Some(x) => x,
-            None => return Err(crate::Error::Sandbox),
+            None => return Err(error::Error::Sandbox),
         };
 
         let mut stdin = None;
@@ -260,9 +263,10 @@ pub struct LinuxBackend {
 }
 
 impl Backend for LinuxBackend {
+    type Error = Error;
     type Sandbox = LinuxSandbox;
     type ChildProcess = LinuxChildProcess;
-    fn new_sandbox(&self, mut options: SandboxOptions) -> crate::Result<LinuxSandbox> {
+    fn new_sandbox(&self, mut options: SandboxOptions) -> Result<LinuxSandbox, Error> {
         options.postprocess();
         let sb =
             unsafe { LinuxSandbox::create(options, &self.settings, self.cgroup_driver.clone())? };
@@ -272,13 +276,13 @@ impl Backend for LinuxBackend {
     fn spawn(
         &self,
         options: ChildProcessOptions<LinuxSandbox>,
-    ) -> crate::Result<Self::ChildProcess> {
+    ) -> Result<Self::ChildProcess, Error> {
         spawn(options)
     }
 }
 
 impl LinuxBackend {
-    pub fn new(settings: Settings) -> crate::Result<LinuxBackend> {
+    pub fn new(settings: Settings) -> Result<LinuxBackend, Error> {
         let cgroup_driver = Arc::new(cgroup::Driver::new(&settings)?);
         Ok(LinuxBackend {
             settings,
