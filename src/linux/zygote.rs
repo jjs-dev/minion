@@ -209,7 +209,7 @@ fn do_exec(mut arg: DoExecArg) -> ! {
         let mut logger = crate::linux::util::StraceLogger::new();
         writeln!(logger, "sandbox {}: ready to execve", arg.jail_id).unwrap();
 
-        libc::execve(
+        libc::execvpe(
             path,
             argv as *const *const c_char,
             envp as *const *const c_char,
