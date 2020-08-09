@@ -306,15 +306,15 @@ fn timed_wait(pid: Pid, timeout: Option<time::Duration>) -> Result<Option<ExitCo
     end_w = 0;
     setup_pipe(&mut end_r, &mut end_w)?;
     let waiter_pid;
+    let mut waiter_arg = WaiterArg { res_fd: end_w, pid };
     {
-        let mut arg = WaiterArg { res_fd: end_w, pid };
         let mut wpid = unsafe { std::mem::zeroed() };
         let ret = unsafe {
             libc::pthread_create(
                 &mut wpid as *mut _,
                 ptr::null(),
                 timed_wait_waiter,
-                &mut arg as *mut WaiterArg as *mut c_void,
+                &mut waiter_arg as *mut WaiterArg as *mut c_void,
             )
         };
         waiter_pid = wpid;
