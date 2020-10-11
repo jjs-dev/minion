@@ -254,7 +254,7 @@ fn spawn_job(
         join_handle: &setup_data.cgroup_join_handle,
         jail_id: &jail_id,
     };
-    let res = nix::unistd::fork()?;
+    let res = unsafe { nix::unistd::fork() }?;
     let child_pid = match res {
         nix::unistd::ForkResult::Child => do_exec(dea),
         nix::unistd::ForkResult::Parent { child } => child,
@@ -374,7 +374,7 @@ pub(in crate::linux) fn start_zygote(
 
     let (return_allowed_r, return_allowed_w) = nix::unistd::pipe().expect("couldn't create pipe");
 
-    match nix::unistd::fork()? {
+    match unsafe { nix::unistd::fork() }? {
         nix::unistd::ForkResult::Child => {
             let sandbox_uid = nix::unistd::Uid::effective();
             // why we use unshare(PID) here, and not in setup_namespace()? See pid_namespaces(7) and unshare(2)
@@ -389,7 +389,7 @@ pub(in crate::linux) fn start_zygote(
                     Err(err)
                 }
             })?;
-            match nix::unistd::fork()? {
+            match unsafe { nix::unistd::fork() }? {
                 nix::unistd::ForkResult::Child => {
                     start_zygote_main_process(jail_options, socket, zyg_sock, cgroup_driver)
                 }

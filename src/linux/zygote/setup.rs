@@ -267,7 +267,7 @@ fn observe_time(
     chan: Fd,
     cgroup_driver: &crate::linux::cgroup::Driver,
 ) -> Result<(), Error> {
-    let fret = nix::unistd::fork()?;
+    let fret = unsafe { nix::unistd::fork() }?;
 
     match fret {
         nix::unistd::ForkResult::Child => cpu_time_observer(
