@@ -123,13 +123,13 @@ fn handle_input_io(spec: InputSpecification) -> Result<(Option<Fd>, Fd), Error> 
             let file = file.into_raw_fd();
             Ok((None, file))
         }
-        InputSpecificationData::Null => Ok((None, -1 as Fd)),
+        InputSpecificationData::Null => Ok((None, -1)),
     }
 }
 
 fn handle_output_io(spec: OutputSpecification) -> Result<(Option<Fd>, Fd), Error> {
     match spec.0 {
-        OutputSpecificationData::Null => Ok((None, -1 as Fd)),
+        OutputSpecificationData::Null => Ok((None, -1)),
         OutputSpecificationData::Handle(rh) => Ok((None, rh as Fd)),
         OutputSpecificationData::Pipe => {
             let mut h_read = 0;

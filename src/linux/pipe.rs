@@ -74,7 +74,7 @@ impl io::Write for LinuxWritePipe {
 
 pub(crate) fn setup_pipe(read_end: &mut Fd, write_end: &mut Fd) -> Result<(), crate::linux::Error> {
     unsafe {
-        let mut ends = [0 as Fd; 2];
+        let mut ends = [0; 2];
         let ret = libc::pipe2(ends.as_mut_ptr(), libc::O_CLOEXEC);
         if ret == -1 {
             err_exit("pipe");
