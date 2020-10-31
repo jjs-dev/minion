@@ -1,5 +1,5 @@
 //! Tests that simple program that does nothing completes successfully.
-use minion::erased::{ChildProcess, Sandbox};
+use minion::erased::Sandbox;
 
 pub(crate) struct TOk;
 impl crate::TestCase for TOk {
@@ -12,10 +12,10 @@ impl crate::TestCase for TOk {
     fn test(&self) -> ! {
         std::process::exit(0)
     }
-    fn check(&self, cp: &mut dyn ChildProcess, _: &dyn Sandbox) {
-        assert!(matches!(cp.get_exit_code(), Ok(Some(0))));
-        super::assert_empty(&mut cp.stdout().unwrap());
-        super::assert_empty(&mut cp.stderr().unwrap());
+    fn check(&self, mut cp: crate::CompletedChild<'_>, _: &dyn Sandbox) {
+        super::assert_exit_code(cp.by_ref(), minion::ExitCode::OK);
+        super::assert_empty(cp.stdout);
+        super::assert_empty(cp.stderr);
     }
     fn real_time_limit(&self) -> std::time::Duration {
         std::time::Duration::from_secs(5)
@@ -34,7 +34,7 @@ impl crate::TestCase for TTl {
     fn test(&self) -> ! {
         exceed_time_limit()
     }
-    fn check(&self, cp: &mut dyn ChildProcess, _: &dyn Sandbox) {
+    fn check(&self, cp: crate::CompletedChild, _: &dyn Sandbox) {
         super::assert_killed(cp);
     }
 }
@@ -53,7 +53,7 @@ impl crate::TestCase for TTlFork {
         nix::unistd::fork().unwrap();
         exceed_time_limit()
     }
-    fn check(&self, cp: &mut dyn ChildProcess, _: &dyn Sandbox) {
+    fn check(&self, cp: crate::CompletedChild, _: &dyn Sandbox) {
         super::assert_killed(cp);
     }
     fn process_count_limit(&self) -> u32 {
@@ -74,7 +74,7 @@ impl crate::TestCase for TIdle {
         nix::unistd::sleep(1_000_000_000);
         std::process::exit(0)
     }
-    fn check(&self, cp: &mut dyn ChildProcess, _: &dyn Sandbox) {
+    fn check(&self, cp: crate::CompletedChild, _: &dyn Sandbox) {
         super::assert_killed(cp);
     }
 }
@@ -90,8 +90,8 @@ impl crate::TestCase for TRet1 {
     fn test(&self) -> ! {
         std::process::exit(1);
     }
-    fn check(&self, cp: &mut dyn ChildProcess, _: &dyn Sandbox) {
-        super::assert_exit_code(cp, 1);
+    fn check(&self, cp: crate::CompletedChild, _: &dyn Sandbox) {
+        super::assert_exit_code(cp, minion::ExitCode(1));
     }
 }
 
@@ -125,7 +125,7 @@ impl crate::TestCase for TOom {
         }
     }
 
-    fn check(&self, _cp: &mut dyn ChildProcess, _sb: &dyn Sandbox) {
+    fn check(&self, _cp: crate::CompletedChild, _sb: &dyn Sandbox) {
         // TODO this test is broken
         // super::assert_exit_code(cp, -9);
         // assert!(!d.check_cpu_tle().unwrap());
@@ -164,10 +164,10 @@ impl crate::TestCase for TSecurity {
         assert!(matches!(err, nix::Error::Sys(nix::errno::Errno::EPERM)));
         std::process::exit(24)
     }
-    fn check(&self, cp: &mut dyn ChildProcess, _sb: &dyn Sandbox) {
-        super::assert_exit_code(cp, 24);
-        super::assert_empty(&mut cp.stdout().unwrap());
-        super::assert_empty(&mut cp.stderr().unwrap());
+    fn check(&self, mut cp: crate::CompletedChild, _sb: &dyn Sandbox) {
+        super::assert_exit_code(cp.by_ref(), minion::ExitCode(24));
+        super::assert_empty(cp.stdout);
+        super::assert_empty(cp.stderr);
     }
 }
 

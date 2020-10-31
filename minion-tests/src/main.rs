@@ -14,6 +14,24 @@
 mod master;
 mod tests;
 mod worker;
+
+pub struct CompletedChild<'a> {
+    pub exit_code: minion::ExitCode,
+    // stdin: &'a mut dyn std::io::Write,
+    pub stdout: &'a mut dyn std::io::Read,
+    pub stderr: &'a mut dyn std::io::Read,
+}
+
+impl<'a> CompletedChild<'a> {
+    pub fn by_ref(&mut self) -> CompletedChild<'_> {
+        CompletedChild {
+            exit_code: self.exit_code,
+            stdout: &mut *self.stdout,
+            stderr: &mut *self.stderr,
+        }
+    }
+}
+
 /// Each test implements this trait.
 pub trait TestCase: Send + Sync {
     /// Returns test name. Executed on master.
@@ -27,7 +45,7 @@ pub trait TestCase: Send + Sync {
     /// If tests passed, does nothing otherwise
     /// panics.
     /// Executed on worker.
-    fn check(&self, cp: &mut dyn minion::erased::ChildProcess, sb: &dyn minion::erased::Sandbox);
+    fn check(&self, cp: CompletedChild, sb: &dyn minion::erased::Sandbox);
     /// Overrides CPU time limit
     fn time_limit(&self) -> std::time::Duration {
         std::time::Duration::from_secs(1)

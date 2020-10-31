@@ -9,6 +9,7 @@ crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 minion = {path = ".."}
+tokio = {version = "0.3.2", features = ["rt", "time"]}
 
 [build-dependencies]
 cbindgen = { version = "0.14.1", default-features = false }

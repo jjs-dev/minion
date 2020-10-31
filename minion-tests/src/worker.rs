@@ -5,7 +5,7 @@ use crate::TestCase;
 // 16 mibibytes
 const MEMORY_LIMIT_IN_BYTES: u64 = 4 * (1 << 20);
 
-pub fn main(test_cases: &[&'static dyn TestCase]) {
+async fn inner_main(test_cases: &[&'static dyn TestCase]) {
     let test_case_name = std::env::var("TEST").unwrap();
     let test_case = test_cases
         .iter()
@@ -41,12 +41,25 @@ pub fn main(test_cases: &[&'static dyn TestCase]) {
         pwd: "/".into(),
     };
     let mut cp = backend.spawn(opts).expect("failed to spawn child");
-    let outcome = cp.wait_for_exit(None).expect("failed to wait for child");
-    match outcome {
-        minion::WaitOutcome::Exited => (),
-        minion::WaitOutcome::AlreadyFinished | minion::WaitOutcome::Timeout => {
-            unreachable!("unexpected wait outcome {:?}", outcome)
-        }
-    }
-    test_case.check(&mut *cp, &*sandbox);
+    let exit_code = cp
+        .wait_for_exit()
+        .expect("failed to start waiting")
+        .await
+        .expect("failed to wait for child");
+    test_case.check(
+        crate::CompletedChild {
+            exit_code,
+            stdout: &mut cp.stdout().unwrap(),
+            stderr: &mut cp.stderr().unwrap(),
+        },
+        &*sandbox,
+    );
+}
+
+pub fn main(test_cases: &[&'static dyn TestCase]) {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(inner_main(test_cases))
 }

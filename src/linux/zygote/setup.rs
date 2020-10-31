@@ -1,7 +1,7 @@
 use crate::{
     linux::{
         jail_common::{self, JailOptions},
-        util::{err_exit, Fd, IpcSocketExt, StraceLogger},
+        util::{err_exit, IpcSocketExt, StraceLogger},
         zygote::{
             SANDBOX_INTERNAL_UID, WM_CLASS_PID_MAP_CREATED, WM_CLASS_PID_MAP_READY_FOR_SETUP,
             WM_CLASS_SETUP_FINISHED,
@@ -10,7 +10,15 @@ use crate::{
     },
     SharedDir, SharedDirKind,
 };
-use std::{ffi::CString, fs, io, io::Write, os::unix::ffi::OsStrExt, path::Path, ptr, time};
+use nix::sys::signal;
+use std::{
+    ffi::CString,
+    fs, io,
+    io::Write,
+    os::unix::{ffi::OsStrExt, io::RawFd},
+    path::Path,
+    ptr, time,
+};
 use tiny_nix_ipc::Socket;
 
 pub(in crate::linux) struct SetupData {
@@ -93,7 +101,6 @@ extern "C" fn exit_sighandler(_code: i32) {
 }
 
 fn setup_sighandler() {
-    use nix::sys::signal;
     for &death in &[
         signal::Signal::SIGABRT,
         signal::Signal::SIGINT,
@@ -120,6 +127,12 @@ fn setup_sighandler() {
                 .expect("Failed to setup SIGTERM handler");
         }
     }
+    // block SIGCHLD
+    // zygote will listen to it by itself
+    let mut sigset = signal::SigSet::empty();
+    sigset.add(signal::Signal::SIGCHLD);
+    signal::sigprocmask(signal::SigmaskHow::SIG_BLOCK, Some(&sigset), None)
+        .expect("failed to block SIGCHLD");
 }
 
 fn setup_chroot(jail_options: &JailOptions) -> Result<(), Error> {
@@ -264,7 +277,7 @@ fn observe_time(
     jail_id: &str,
     cpu_time_limit: u64,
     real_time_limit: u64,
-    chan: Fd,
+    chan: RawFd,
     cgroup_driver: &crate::linux::cgroup::Driver,
 ) -> Result<(), Error> {
     let fret = unsafe { nix::unistd::fork() }?;

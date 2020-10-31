@@ -4,6 +4,8 @@
 //! Please note that this API is not type-safe. For example, if you pass
 //! `Sandbox` instance to another backend, it will panic.
 
+use futures_util::{FutureExt, TryFutureExt};
+
 /// Type-erased `Sandbox`
 pub trait Sandbox: std::fmt::Debug {
     fn id(&self) -> String;
@@ -50,22 +52,15 @@ impl<S: crate::Sandbox> Sandbox for S {
 
 /// Type-erased `ChildProcess`
 pub trait ChildProcess {
-    fn get_exit_code(&self) -> anyhow::Result<Option<i64>>;
     fn stdin(&mut self) -> Option<Box<dyn std::io::Write + Send + Sync + 'static>>;
     fn stdout(&mut self) -> Option<Box<dyn std::io::Read + Send + Sync + 'static>>;
     fn stderr(&mut self) -> Option<Box<dyn std::io::Read + Send + Sync + 'static>>;
     fn wait_for_exit(
-        &self,
-        timeout: Option<std::time::Duration>,
-    ) -> anyhow::Result<crate::WaitOutcome>;
-    fn poll(&self) -> anyhow::Result<()>;
-    fn is_finished(&self) -> anyhow::Result<bool>;
+        &mut self,
+    ) -> anyhow::Result<futures_util::future::BoxFuture<'static, anyhow::Result<crate::ExitCode>>>;
 }
 
 impl<C: crate::ChildProcess> ChildProcess for C {
-    fn get_exit_code(&self) -> anyhow::Result<Option<i64>> {
-        self.get_exit_code().map_err(Into::into)
-    }
     fn stdin(&mut self) -> Option<Box<dyn std::io::Write + Send + Sync + 'static>> {
         match self.stdin() {
             Some(s) => Some(Box::new(s)),
@@ -85,16 +80,10 @@ impl<C: crate::ChildProcess> ChildProcess for C {
         }
     }
     fn wait_for_exit(
-        &self,
-        timeout: Option<std::time::Duration>,
-    ) -> anyhow::Result<crate::WaitOutcome> {
-        self.wait_for_exit(timeout).map_err(Into::into)
-    }
-    fn poll(&self) -> anyhow::Result<()> {
-        self.poll().map_err(Into::into)
-    }
-    fn is_finished(&self) -> anyhow::Result<bool> {
-        self.is_finished().map_err(Into::into)
+        &mut self,
+    ) -> anyhow::Result<futures_util::future::BoxFuture<'static, anyhow::Result<crate::ExitCode>>>
+    {
+        Ok(self.wait_for_exit()?.map_err(Into::into).boxed())
     }
 }
 

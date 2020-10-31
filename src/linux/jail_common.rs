@@ -1,10 +1,7 @@
-use crate::{
-    linux::util::{Fd, Pid},
-    SharedDir,
-};
+use crate::{linux::util::Pid, SharedDir};
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
-use std::{ffi::OsString, path::PathBuf, time::Duration};
+use std::{ffi::OsString, os::unix::io::RawFd, path::PathBuf, time::Duration};
 use tiny_nix_ipc::Socket;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -19,7 +16,7 @@ pub(crate) struct JailOptions {
     pub(crate) isolation_root: PathBuf,
     pub(crate) exposed_paths: Vec<SharedDir>,
     pub(crate) jail_id: String,
-    pub(crate) watchdog_chan: Fd,
+    pub(crate) watchdog_chan: RawFd,
     pub(crate) allow_mount_ns_failure: bool,
 }
 
@@ -44,10 +41,10 @@ pub(crate) struct JobQuery {
     pub(crate) pwd: PathBuf,
 }
 
+/// Asks zygote for exit code of **completed** task.
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub(crate) struct PollQuery {
+pub(crate) struct GetExitCodeQuery {
     pub(crate) pid: Pid,
-    pub(crate) timeout: Option<Duration>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -63,9 +60,10 @@ pub(crate) struct ZygoteStartupInfo {
 #[derive(Serialize, Deserialize, Debug)]
 #[repr(C)]
 pub(crate) enum Query {
+    // TODO: is this used?
     Exit,
     Spawn(JobQuery),
-    Poll(PollQuery),
+    GetExitCode(GetExitCodeQuery),
 }
 
 fn send_term_signals(target_pid: Pid) {
@@ -81,7 +79,7 @@ fn send_term_signals(target_pid: Pid) {
 /// Kills sandbox where current process is executed
 pub(crate) fn kill_this_sandbox() -> ! {
     send_term_signals(1);
-    // now let's wait while kernel will kill us
+    // now let's wait until kernel kills us
     loop {
         std::thread::sleep(std::time::Duration::from_secs(1));
     }

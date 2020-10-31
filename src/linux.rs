@@ -6,15 +6,16 @@ mod jail_common;
 mod pipe;
 mod sandbox;
 mod util;
+mod wait;
 mod zygote;
 
 use crate::{
     linux::{
         pipe::{LinuxReadPipe, LinuxWritePipe},
-        util::{get_last_error, Fd, Pid},
+        util::{get_last_error, Pid},
     },
     Backend, ChildProcess, ChildProcessOptions, InputSpecification, InputSpecificationData,
-    OutputSpecification, OutputSpecificationData, SandboxOptions, WaitOutcome,
+    OutputSpecification, OutputSpecificationData, SandboxOptions,
 };
 pub use error::Error;
 use nix::sys::memfd;
@@ -22,11 +23,10 @@ pub use sandbox::LinuxSandbox;
 use std::{
     ffi::CString,
     fs,
-    os::unix::io::IntoRawFd,
+    os::unix::io::{IntoRawFd, RawFd},
     path::PathBuf,
     sync::atomic::{AtomicI64, Ordering},
     sync::Arc,
-    time::Duration,
 };
 
 pub type LinuxHandle = libc::c_int;
@@ -37,8 +37,11 @@ pub struct LinuxChildProcess {
     stdout: Option<LinuxReadPipe>,
     stderr: Option<LinuxReadPipe>,
     sandbox_ref: LinuxSandbox,
-
+    /// Child pid, relative to sandbox namespace.
     pid: Pid,
+    /// FD of object which will be readable when child finishes.
+    /// Wrapped in Option to catch user errors.
+    fd: Option<RawFd>,
 }
 
 impl std::fmt::Debug for LinuxChildProcess {
@@ -57,15 +60,8 @@ impl ChildProcess for LinuxChildProcess {
     type Error = Error;
     type PipeIn = LinuxWritePipe;
     type PipeOut = LinuxReadPipe;
-    fn get_exit_code(&self) -> Result<Option<i64>, Error> {
-        self.poll()?;
-        let ec = self.exit_code.load(Ordering::SeqCst);
-        let ec = match ec {
-            EXIT_CODE_STILL_RUNNING => None,
-            w => Some(w),
-        };
-        Ok(ec)
-    }
+
+    type WaitFuture = wait::WaitFuture;
 
     fn stdin(&mut self) -> Option<LinuxWritePipe> {
         self.stdin.take()
@@ -79,32 +75,16 @@ impl ChildProcess for LinuxChildProcess {
         self.stderr.take()
     }
 
-    fn wait_for_exit(&self, timeout: Option<std::time::Duration>) -> Result<WaitOutcome, Error> {
-        if self.exit_code.load(Ordering::SeqCst) != EXIT_CODE_STILL_RUNNING {
-            return Ok(WaitOutcome::AlreadyFinished);
-        }
-        let wait_result = unsafe { self.sandbox_ref.poll_job(self.pid, timeout) };
-        match wait_result {
-            None => Ok(WaitOutcome::Timeout),
-            Some(w) => {
-                self.exit_code.store(w, Ordering::SeqCst);
-                Ok(WaitOutcome::Exited)
-            }
-        }
-    }
-
-    fn poll(&self) -> Result<(), Error> {
-        self.wait_for_exit(Some(Duration::from_nanos(1)))
-            .map(|_w| ())
-    }
-
-    fn is_finished(&self) -> Result<bool, Error> {
-        self.poll()?;
-        Ok(self.exit_code.load(Ordering::SeqCst) != EXIT_CODE_STILL_RUNNING)
+    fn wait_for_exit(&mut self) -> Result<Self::WaitFuture, Error> {
+        wait::WaitFuture::new(
+            self.fd.take().expect("wait_for_exit called twice"),
+            self.pid,
+            self.sandbox_ref.clone(),
+        )
     }
 }
 
-fn handle_input_io(spec: InputSpecification) -> Result<(Option<Fd>, Fd), Error> {
+fn handle_input_io(spec: InputSpecification) -> Result<(Option<RawFd>, RawFd), Error> {
     match spec.0 {
         InputSpecificationData::Pipe => {
             let mut h_read = 0;
@@ -115,7 +95,7 @@ fn handle_input_io(spec: InputSpecification) -> Result<(Option<Fd>, Fd), Error> 
             Ok((Some(h_write), f))
         }
         InputSpecificationData::Handle(rh) => {
-            let h = rh as Fd;
+            let h = rh as RawFd;
             Ok((None, h))
         }
         InputSpecificationData::Empty => {
@@ -127,10 +107,10 @@ fn handle_input_io(spec: InputSpecification) -> Result<(Option<Fd>, Fd), Error> 
     }
 }
 
-fn handle_output_io(spec: OutputSpecification) -> Result<(Option<Fd>, Fd), Error> {
+fn handle_output_io(spec: OutputSpecification) -> Result<(Option<RawFd>, RawFd), Error> {
     match spec.0 {
         OutputSpecificationData::Null => Ok((None, -1)),
-        OutputSpecificationData::Handle(rh) => Ok((None, rh as Fd)),
+        OutputSpecificationData::Handle(rh) => Ok((None, rh as RawFd)),
         OutputSpecificationData::Pipe => {
             let mut h_read = 0;
             let mut h_write = 0;
@@ -189,17 +169,12 @@ fn spawn(mut options: ChildProcessOptions<LinuxSandbox>) -> Result<LinuxChildPro
             stderr: err_w,
         };
 
-        let spawn_result = options.sandbox.spawn_job(q);
+        let (job_startup_info, exit_fd) = options.sandbox.spawn_job(q)?;
 
         // cleanup child stdio now
         libc::close(in_r);
         libc::close(out_w);
         libc::close(err_w);
-
-        let ret = match spawn_result {
-            Some(x) => x,
-            None => return Err(error::Error::Sandbox),
-        };
 
         let mut stdin = None;
         if let Some(h) = in_w {
@@ -224,7 +199,8 @@ fn spawn(mut options: ChildProcessOptions<LinuxSandbox>) -> Result<LinuxChildPro
             stdout,
             stderr,
             sandbox_ref: options.sandbox,
-            pid: ret.pid,
+            pid: job_startup_info.pid,
+            fd: Some(exit_fd),
         })
     }
 }
@@ -283,6 +259,7 @@ impl Backend for LinuxBackend {
 
 impl LinuxBackend {
     pub fn new(settings: Settings) -> Result<LinuxBackend, Error> {
+        self::check::run_all_feature_checks();
         let cgroup_driver = Arc::new(cgroup::Driver::new(&settings)?);
         Ok(LinuxBackend {
             settings,
