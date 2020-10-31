@@ -170,7 +170,7 @@ fn do_exec(mut arg: DoExecArg) -> ! {
             if -1 == libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) {
                 let fd_info_path = format!("/proc/self/fd/{}", fd);
                 let fd_info_path = CString::new(fd_info_path.as_str()).unwrap();
-                let mut fd_info = [0 as c_char; 4096];
+                let mut fd_info = [0; 4096];
                 libc::readlink(fd_info_path.as_ptr(), fd_info.as_mut_ptr(), 4096);
                 let fd_info = CString::from_raw(fd_info.as_mut_ptr());
                 let fd_info = fd_info.to_str().unwrap();
@@ -420,7 +420,7 @@ fn start_zygote_caller(
     let mut logger = crate::linux::util::strace_logger();
     write!(logger, "sandbox {}: thread A (main)", &jail_options.jail_id).unwrap();
 
-    let mut zygote_pid_bytes = [0 as u8; 4];
+    let mut zygote_pid_bytes = [0; 4];
 
     // Wait until zygote is ready.
     // Zygote is ready when zygote launcher returns it's pid
