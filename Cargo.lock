@@ -282,7 +282,7 @@ dependencies = [
  "backtrace",
  "errno",
  "libc",
- "nix 0.18.0",
+ "nix 0.19.0",
  "procfs",
  "rand",
  "serde",
@@ -357,8 +357,9 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.18.0"
-source = "git+https://github.com/nix-rust/nix#89b029b18ccea69a83cc768a12a6c4f517ac7f21"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85db2feff6bf70ebc3a4793191517d5f0331100a2f10f9bf93b5e5214f32b7b7"
 dependencies = [
  "bitflags",
  "cc",
