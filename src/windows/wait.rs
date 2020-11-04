@@ -5,8 +5,8 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{
-            AtomicBool, AtomicU32,
-            Ordering::{Acquire, Relaxed, Release},
+            AtomicBool,
+            Ordering::{Acquire, Release},
         },
         Arc,
     },

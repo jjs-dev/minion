@@ -138,12 +138,38 @@ pub(in crate::windows) struct ChildParams {
 // TODO: upstream to winapi: https://github.com/retep998/winapi-rs/pull/933/
 const MAGIC_PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES: usize = 131081;
 
+struct AlignedMemBlock(*mut u8, usize);
+
+impl AlignedMemBlock {
+    fn layout(cnt: usize) -> std::alloc::Layout {
+        assert!(cnt > 0);
+        std::alloc::Layout::from_size_align(cnt, 8).unwrap()
+    }
+
+    fn new(cnt: usize) -> AlignedMemBlock {
+        let ptr = unsafe { std::alloc::alloc_zeroed(Self::layout(cnt)) };
+        AlignedMemBlock(ptr, cnt)
+    }
+
+    fn ptr(&self) -> *mut u8 {
+        self.0
+    }
+}
+
+impl Drop for AlignedMemBlock {
+    fn drop(&mut self) {
+        unsafe {
+            std::alloc::dealloc(self.0, Self::layout(self.1));
+        }
+    }
+}
+
 pub(in crate::windows) fn spawn(
     sandbox: &WindowsSandbox,
     stdio: Stdio,
     params: ChildParams,
 ) -> Result<PROCESS_INFORMATION, Error> {
-    let mut proc_thread_attr_list_storage: Vec<u64>;
+    let proc_thread_attr_list_storage;
     let mut security_capabilities;
     let mut startup_info = unsafe {
         let mut startup_info: STARTUPINFOEXW = std::mem::zeroed();
@@ -160,9 +186,8 @@ pub(in crate::windows) fn spawn(
                 return Err(Error::last());
             }
         }
-        proc_thread_attr_list_storage = Vec::with_capacity((proc_thread_attr_list_len - 1) / 8 + 1);
-        let proc_thread_attr_list: *mut u8 = proc_thread_attr_list_storage.as_mut_ptr().cast();
-        proc_thread_attr_list.write_bytes(0, proc_thread_attr_list_len);
+        proc_thread_attr_list_storage = AlignedMemBlock::new(proc_thread_attr_list_len);
+        let proc_thread_attr_list = proc_thread_attr_list_storage.ptr();
         startup_info.lpAttributeList = proc_thread_attr_list.cast();
         Cvt::nonzero(InitializeProcThreadAttributeList(
             startup_info.lpAttributeList,
@@ -173,11 +198,14 @@ pub(in crate::windows) fn spawn(
         security_capabilities = sandbox.profile.get_security_capabilities();
         Cvt::nonzero(UpdateProcThreadAttribute(
             startup_info.lpAttributeList,
+            // reserved
             0,
             MAGIC_PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
             (&mut security_capabilities as *mut SECURITY_CAPABILITIES).cast(),
             std::mem::size_of::<SECURITY_ATTRIBUTES>(),
+            // reserved
             std::ptr::null_mut(),
+            // reserved
             std::ptr::null_mut(),
         ))?;
 
@@ -211,13 +239,12 @@ pub(in crate::windows) fn spawn(
             // inherit handles
             TRUE,
             creation_flags,
-            // TEMP DEBUG
-            std::ptr::null_mut(),
-            //env.as_mut_ptr().cast(),
+            env.as_mut_ptr().cast(),
             cwd.as_ptr(),
             (&mut startup_info as *mut STARTUPINFOEXW).cast(),
             &mut info,
         ))?;
+        DeleteProcThreadAttributeList(startup_info.lpAttributeList);
     }
     Ok(info)
 }

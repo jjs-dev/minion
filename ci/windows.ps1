@@ -19,7 +19,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Output "::group::Running tests"
 $env:RUST_BACKTRACE = 1
-./out/minion-tests.exe
+./out/minion-tests.exe --trace
 if ($LASTEXITCODE -ne 0) {
     throw "tests failed"
 }

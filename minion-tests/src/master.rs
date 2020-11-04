@@ -73,12 +73,53 @@ fn execute_tests(test_cases: &[&dyn TestCase], exec_opts: ExecuteOptions) -> Out
 fn execute_single_test(case: &dyn TestCase, exec_opts: ExecuteOptions) -> Outcome {
     println!("------ {} ------", case.name());
     let self_exe = std::env::current_exe().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let mut temp_logs_dir = None;
     let mut cmd = if exec_opts.trace {
-        let mut cmd = std::process::Command::new("strace");
-        cmd.arg("-f"); // follow forks
-        cmd.arg("-o").arg(format!("strace-log-{}.txt", case.name()));
-        cmd.arg(self_exe);
-        cmd
+        if cfg!(target_os = "linux") {
+            let mut cmd = std::process::Command::new("strace");
+            cmd.arg("-f"); // follow forks
+            cmd.arg("-o").arg(format!("strace-log-{}.txt", case.name()));
+            cmd.arg(self_exe);
+            cmd
+        } else if cfg!(target_os = "windows") {
+            let mut cmd = std::process::Command::new(
+                "C:\\Program Files (x86)\\Windows Kits\\10\\Debuggers\\x64\\cdb.exe",
+            );
+            // disable debug heap
+            cmd.arg("-hd");
+            // follow children
+            cmd.arg("-o");
+
+            let script_file_path = tmp.path().join("cdb-script.txt");
+            let logs_path: std::path::PathBuf = format!(".\\strace-ntapi-{}", case.name()).into();
+            std::fs::create_dir(&logs_path).unwrap();
+            println!("Saving logs to {}", logs_path.display());
+            std::fs::write(
+                &script_file_path,
+                [
+                    &format!("!logexts.loge {}", logs_path.display()),
+                    "!logexts.logc e *",
+                    "!logexts.logo e d",
+                    "!logexts.logo e t",
+                    "!logexts.logo e v",
+                    "g",
+                    "!logexts.logb f",
+                    "q",
+                ]
+                .join("\n"),
+            )
+            .unwrap();
+
+            temp_logs_dir.replace(logs_path);
+
+            cmd.arg("-cf").arg(&script_file_path);
+
+            cmd.arg(self_exe);
+            cmd
+        } else {
+            panic!("--trace unsupported on this target")
+        }
     } else {
         std::process::Command::new(self_exe)
     };
