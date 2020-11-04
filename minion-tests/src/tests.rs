@@ -1,7 +1,6 @@
 mod simple;
 
 use crate::TestCase;
-use minion::erased::ChildProcess;
 use once_cell::sync::Lazy;
 use std::io::Read;
 
@@ -41,14 +40,11 @@ fn assert_contains(r: &mut dyn Read, expected: &[u8]) {
     }
 }
 
-fn assert_killed(cp: &mut dyn ChildProcess) {
-    assert_exit_code(cp, minion::EXIT_CODE_KILLED);
+fn assert_killed(cp: crate::CompletedChild) {
+    assert_exit_code(cp, minion::ExitCode::KILLED);
 }
 
-fn assert_exit_code(cp: &mut dyn ChildProcess, exp_exit_code: i64) {
-    let act_exit_code = cp
-        .get_exit_code()
-        .expect("failed to get exit code")
-        .expect("exit code missing");
+fn assert_exit_code(cp: crate::CompletedChild, exp_exit_code: minion::ExitCode) {
+    let act_exit_code = cp.exit_code;
     assert_eq!(act_exit_code, exp_exit_code);
 }

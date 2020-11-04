@@ -36,7 +36,6 @@ pub extern "C" fn minion_describe_status(error_code: ErrorCode) -> *const u8 {
 #[repr(i32)]
 pub enum WaitOutcome {
     Exited,
-    AlreadyFinished,
     Timeout,
 }
 
@@ -335,66 +334,42 @@ pub unsafe extern "C" fn minion_cp_spawn(
 /// Provided pointers must be valid
 #[no_mangle]
 #[must_use]
+// TODO: async counterpart
 pub unsafe extern "C" fn minion_cp_wait(
     cp: &mut ChildProcess,
     timeout: Option<&TimeSpec>,
     out: *mut WaitOutcome,
 ) -> ErrorCode {
-    let ans = cp.0.wait_for_exit(
-        timeout
-            .map(|timeout| std::time::Duration::new(timeout.seconds.into(), timeout.nanoseconds)),
-    );
-    match ans {
-        Result::Ok(ans) => {
-            let outcome = match ans {
-                minion::WaitOutcome::Exited => WaitOutcome::Exited,
-                minion::WaitOutcome::AlreadyFinished => WaitOutcome::AlreadyFinished,
-                minion::WaitOutcome::Timeout => WaitOutcome::Timeout,
-            };
-            unsafe {
-                out.write(outcome);
-            }
-            ErrorCode::Ok
-        }
-        Result::Err(_) => ErrorCode::Minion,
-    }
-}
-
-#[no_mangle]
-pub static EXIT_CODE_STILL_RUNNING: i64 = 1234_4321;
-
-/// Returns child process (pointed by `cp`) exit code.
-///
-/// `out` will contain exit code. If child is still running,
-/// `out` will not be written to.
-///
-/// if `finish_flag` is non-null it will be written 0/1 flag:
-/// has child finished.
-/// # Safety
-/// Provided pointers must be valid
-#[no_mangle]
-#[must_use]
-pub unsafe extern "C" fn minion_cp_exitcode(
-    cp: &ChildProcess,
-    out: *mut i64,
-    finish_flag: *mut u8,
-) -> ErrorCode {
-    match cp.0.get_exit_code() {
-        Result::Ok(exit_code) => {
-            if let Some(code) = exit_code {
-                unsafe {
-                    out.write(code);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to start an async runtime");
+    let timeout = timeout
+        .map(|timeout| std::time::Duration::new(timeout.seconds.into(), timeout.nanoseconds));
+    let fut = match cp.0.wait_for_exit() {
+        Ok(fut) => fut,
+        Err(_) => return ErrorCode::Minion,
+    };
+    let outcome = if let Some(timeout) = timeout {
+        match rt.block_on(tokio::time::timeout(timeout, fut)) {
+            Ok(res) => {
+                if res.is_err() {
+                    return ErrorCode::Minion;
                 }
-            } else {
-                unsafe { out.write(EXIT_CODE_STILL_RUNNING) }
+                WaitOutcome::Exited
             }
-            if !finish_flag.is_null() {
-                unsafe { finish_flag.write(exit_code.is_some() as u8) };
-            }
-            ErrorCode::Ok
+            Err(_elapsed) => WaitOutcome::Timeout,
         }
-        Result::Err(_) => ErrorCode::Minion,
+    } else {
+        match rt.block_on(fut) {
+            Ok(_) => WaitOutcome::Exited,
+            Err(_) => return ErrorCode::Minion,
+        }
+    };
+    unsafe {
+        out.write(outcome);
     }
+    ErrorCode::Ok
 }
 
 /// # Safety

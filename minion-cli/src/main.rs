@@ -99,7 +99,8 @@ struct ExecOpt {
     pwd: String,
 }
 
-fn main() {
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
     let options: ExecOpt = ExecOpt::from_args();
     if options.dump_argv {
         println!("{:#?}", options);
@@ -152,9 +153,8 @@ fn main() {
     if options.dump_minion_params {
         println!("{:#?}", args);
     }
-    let cp = backend.spawn(args).unwrap();
-    cp.wait_for_exit(None).unwrap();
-    let exit_code = cp.get_exit_code().unwrap();
+    let mut cp = backend.spawn(args).unwrap();
+    let exit_code = cp.wait_for_exit().unwrap().await.unwrap();
     println!("---> Child process exited with code {:?} <---", exit_code);
     if sandbox.check_cpu_tle().unwrap() {
         println!("Note: CPU time limit was exceeded");

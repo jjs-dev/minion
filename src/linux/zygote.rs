@@ -8,20 +8,18 @@ mod setup;
 
 use crate::linux::{
     jail_common::{self, JailOptions},
-    pipe::setup_pipe,
-    util::{duplicate_string, err_exit, ExitCode, Fd, IpcSocketExt, Pid, Uid},
+    util::{duplicate_string, err_exit, IpcSocketExt, Pid, Uid},
     Error,
 };
-use libc::{c_char, c_void};
-use nix::sys::time::TimeValLike;
+use libc::c_char;
 use std::{
     ffi::{CString, OsStr, OsString},
     fs,
     io::Write,
     mem,
-    os::unix::ffi::OsStrExt,
+    os::unix::{ffi::OsStrExt, io::RawFd},
     path::PathBuf,
-    ptr, time,
+    ptr,
 };
 use tiny_nix_ipc::Socket;
 
@@ -31,13 +29,13 @@ use setup::SetupData;
 const SANDBOX_INTERNAL_UID: Uid = 179;
 
 struct Stdio {
-    stdin: Fd,
-    stdout: Fd,
-    stderr: Fd,
+    stdin: RawFd,
+    stdout: RawFd,
+    stderr: RawFd,
 }
 
 impl Stdio {
-    fn from_fd_array(fds: [Fd; 3]) -> Stdio {
+    fn from_fd_array(fds: [RawFd; 3]) -> Stdio {
         Stdio {
             stdin: fds[0],
             stdout: fds[1],
@@ -164,7 +162,7 @@ fn do_exec(mut arg: DoExecArg) -> ! {
         for fd in fd_list {
             let fd = fd.expect("failed to get fd entry metadata");
             let fd = fd.file_name().to_string_lossy().to_string();
-            let fd: Fd = fd
+            let fd: RawFd = fd
                 .parse()
                 .expect("/proc/self/fd member file name is not fd");
             if -1 == libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) {
@@ -274,98 +272,6 @@ const WM_CLASS_SETUP_FINISHED: &[u8] = b"WM_SETUP";
 const WM_CLASS_PID_MAP_READY_FOR_SETUP: &[u8] = b"WM_SETUP_READY";
 const WM_CLASS_PID_MAP_CREATED: &[u8] = b"WM_PIDMAP_DONE";
 
-struct WaiterArg {
-    res_fd: Fd,
-    pid: Pid,
-}
-
-extern "C" fn timed_wait_waiter(arg: *mut c_void) -> *mut c_void {
-    unsafe {
-        let arg = arg as *mut WaiterArg;
-        let arg = &mut *arg;
-        let mut waitstatus = 0;
-
-        let wcode = libc::waitpid(arg.pid, &mut waitstatus, libc::__WALL);
-        if wcode == -1 {
-            err_exit("waitpid");
-        }
-        let exit_code: i32 = if libc::WIFEXITED(waitstatus) {
-            libc::WEXITSTATUS(waitstatus)
-        } else {
-            -libc::WTERMSIG(waitstatus)
-        };
-        let message = exit_code.to_ne_bytes();
-        libc::write(arg.res_fd, message.as_ptr() as *const _, message.len());
-        ptr::null_mut()
-    }
-}
-
-fn timed_wait(pid: Pid, timeout: Option<time::Duration>) -> Result<Option<ExitCode>, Error> {
-    let (mut end_r, mut end_w);
-    end_r = 0;
-    end_w = 0;
-    setup_pipe(&mut end_r, &mut end_w)?;
-    let waiter_pid;
-    let mut waiter_arg = WaiterArg { res_fd: end_w, pid };
-    {
-        let mut wpid = unsafe { std::mem::zeroed() };
-        let ret = unsafe {
-            libc::pthread_create(
-                &mut wpid as *mut _,
-                ptr::null(),
-                timed_wait_waiter,
-                &mut waiter_arg as *mut WaiterArg as *mut c_void,
-            )
-        };
-        waiter_pid = wpid;
-        if ret != 0 {
-            errno::set_errno(errno::Errno(ret));
-            err_exit("pthread_create");
-        }
-    }
-    // TL&DR - select([ready_r], timeout)
-    let mut poll_fd_info = [nix::poll::PollFd::new(end_r, nix::poll::PollFlags::POLLIN)];
-    let timeout = timeout.map(|timeout| {
-        nix::sys::time::TimeSpec::nanoseconds(timeout.subsec_nanos() as i64)
-            + nix::sys::time::TimeSpec::seconds(timeout.as_secs() as i64)
-    });
-    let ret = loop {
-        let poll_ret = nix::poll::ppoll(
-            &mut poll_fd_info[..],
-            timeout,
-            nix::sys::signal::SigSet::empty(),
-        );
-        let ret: Option<_> = match poll_ret {
-            Err(_) => {
-                let sys_err = nix::errno::errno();
-                if sys_err == libc::EINTR {
-                    continue;
-                }
-                return Err(Error::Syscall { code: sys_err });
-            }
-            Ok(0) => None,
-            Ok(1) => {
-                let mut exit_code = [0; 4];
-                let read_cnt = nix::unistd::read(end_r, &mut exit_code)?;
-                assert_eq!(read_cnt, exit_code.len());
-                let exit_code = i32::from_ne_bytes(exit_code);
-                Some(exit_code as i64)
-            }
-            Ok(x) => unreachable!("unexpected return code from poll: {}", x),
-        };
-        break ret;
-    };
-
-    unsafe {
-        // SAFETY: waiter thread does not creates stack object that rely on
-        // Drop being called.
-        libc::pthread_cancel(waiter_pid);
-    }
-    nix::unistd::close(end_r)?;
-    nix::unistd::close(end_w)?;
-    Ok(ret)
-}
-
 pub(in crate::linux) fn start_zygote(
     jail_options: JailOptions,
     cgroup_driver: &crate::linux::cgroup::Driver,
@@ -412,8 +318,8 @@ pub(in crate::linux) fn start_zygote(
 
 /// Thread A it is thread that entered start_zygote() normally, returns from function
 fn start_zygote_caller(
-    return_allowed_r: Fd,
-    return_allowed_w: Fd,
+    return_allowed_r: RawFd,
+    return_allowed_w: RawFd,
     jail_options: JailOptions,
     socket: Socket,
 ) -> Result<ZygoteStartupInfo, Error> {
@@ -441,7 +347,7 @@ fn start_zygote_initialization_helper(
     child_pid: Pid,
     jail_options: JailOptions,
     mut socket: Socket,
-    return_allowed_w: Fd,
+    return_allowed_w: RawFd,
     sandbox_uid: u32,
 ) -> Result<std::convert::Infallible, Error> {
     let mut logger = crate::linux::util::strace_logger();
@@ -493,9 +399,9 @@ fn start_zygote_main_process(
         sock: zyg_sock,
         cgroup_driver,
     };
-    let zygote_ret_code = main_loop::zygote_entry(zyg_opts);
+    let zygote_ret_code = main_loop::entry(zyg_opts);
 
     unsafe {
-        libc::exit(zygote_ret_code.unwrap_or(1));
+        libc::exit(zygote_ret_code.map(main_loop::ReturnCode::get).unwrap_or(1));
     }
 }

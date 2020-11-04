@@ -2,19 +2,18 @@ use crate::{
     linux::{
         jail_common,
         pipe::setup_pipe,
-        util::{ExitCode, Fd, IpcSocketExt, Pid},
+        util::{IpcSocketExt, Pid},
         zygote, Error,
     },
-    Sandbox, SandboxOptions,
+    ExitCode, Sandbox, SandboxOptions,
 };
 use std::{
     fmt::{self, Debug},
-    os::unix::io::AsRawFd,
+    os::unix::io::{AsRawFd, RawFd},
     sync::{
         atomic::{AtomicBool, Ordering::SeqCst},
         Arc, Mutex,
     },
-    time::Duration,
 };
 use tiny_nix_ipc::Socket;
 
@@ -60,7 +59,7 @@ struct LinuxSandboxInner {
     zygote_sock: Mutex<Socket>,
     zygote_pid: Pid,
     state: SandboxState,
-    watchdog_chan: Fd,
+    watchdog_chan: RawFd,
     cgroup_driver: Arc<crate::linux::cgroup::Driver>,
 }
 
@@ -68,10 +67,10 @@ struct LinuxSandboxInner {
 struct LinuxSandboxDebugHelper<'a> {
     id: &'a str,
     options: &'a SandboxOptions,
-    zygote_sock: Fd,
+    zygote_sock: RawFd,
     zygote_pid: Pid,
     state: SandboxState,
-    watchdog_chan: Fd,
+    watchdog_chan: RawFd,
 }
 
 impl Debug for LinuxSandbox {
@@ -124,9 +123,9 @@ impl Sandbox for LinuxSandbox {
 
 pub(crate) struct ExtendedJobQuery {
     pub(crate) job_query: jail_common::JobQuery,
-    pub(crate) stdin: Fd,
-    pub(crate) stdout: Fd,
-    pub(crate) stderr: Fd,
+    pub(crate) stdin: RawFd,
+    pub(crate) stdout: RawFd,
+    pub(crate) stderr: RawFd,
 }
 
 impl LinuxSandbox {
@@ -198,7 +197,7 @@ impl LinuxSandbox {
     pub(crate) unsafe fn spawn_job(
         &self,
         query: ExtendedJobQuery,
-    ) -> Option<jail_common::JobStartupInfo> {
+    ) -> Result<(jail_common::JobStartupInfo, RawFd), Error> {
         let q = jail_common::Query::Spawn(query.job_query.clone());
 
         let mut sock = self.0.zygote_sock.lock().unwrap();
@@ -209,16 +208,22 @@ impl LinuxSandbox {
         let fds = [query.stdin, query.stdout, query.stderr];
         let empty: u64 = 0xDEAD_F00D_B17B_00B5;
         sock.send_struct(&empty, Some(&fds)).ok();
-        sock.recv().ok()
+        let job_startup_info = sock.recv()?;
+        let fd = sock
+            .recv_into_buf::<[RawFd; 1]>(1)
+            .map_err(|_| Error::Sandbox)?
+            .2
+            .ok_or(Error::Sandbox)?;
+        Ok((job_startup_info, fd[0]))
     }
 
-    pub(crate) unsafe fn poll_job(&self, pid: Pid, timeout: Option<Duration>) -> Option<ExitCode> {
-        let q = jail_common::Query::Poll(jail_common::PollQuery { pid, timeout });
+    pub(crate) fn get_exit_code(&self, pid: Pid) -> ExitCode {
+        let q = jail_common::Query::GetExitCode(jail_common::GetExitCodeQuery { pid });
         let mut sock = self.0.zygote_sock.lock().unwrap();
         sock.send(&q).ok();
-        match sock.recv::<Option<i32>>() {
-            Ok(x) => x.map(Into::into),
-            Err(_) => Some(crate::EXIT_CODE_KILLED),
+        match sock.recv::<i32>() {
+            Ok(ec) => ExitCode(ec.into()),
+            Err(_) => crate::ExitCode::KILLED,
         }
     }
 }

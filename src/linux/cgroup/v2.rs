@@ -1,12 +1,12 @@
 //! Implements Cgroup Driver for V2 cgroups
-use crate::linux::{
-    cgroup::{Driver, ResourceLimits},
-    util::Fd,
+use crate::linux::cgroup::{Driver, ResourceLimits};
+use std::{
+    os::unix::io::{IntoRawFd, RawFd},
+    path::PathBuf,
 };
-use std::{os::unix::io::IntoRawFd, path::PathBuf};
 
 impl Driver {
-    pub(super) fn setup_cgroups_v2(&self, limits: &ResourceLimits, cgroup_id: &str) -> Fd {
+    pub(super) fn setup_cgroups_v2(&self, limits: &ResourceLimits, cgroup_id: &str) -> RawFd {
         let cgroup_path = self.get_path_for_cgroup_unified(cgroup_id);
         std::fs::create_dir_all(&cgroup_path).expect("failed to create cgroup");
 

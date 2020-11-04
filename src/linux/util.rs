@@ -7,11 +7,27 @@ use std::{
 };
 use tiny_nix_ipc::{self, Socket};
 
-pub type Fd = RawFd;
-
 pub type Pid = libc::pid_t;
-pub type ExitCode = i64;
 pub type Uid = libc::uid_t;
+
+pub(crate) fn pidfd_open(pid: Pid) -> std::io::Result<RawFd> {
+    let res = unsafe { libc::syscall(434, pid, 0) };
+    if res >= 0 {
+        Ok(res as _)
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+pub(crate) fn pidfd_send_signal(pid: Pid, signal: libc::c_int) -> std::io::Result<()> {
+    let res =
+        unsafe { libc::syscall(424, pid, signal, std::ptr::null::<libc::siginfo_t>(), 0_u32) };
+    if res != -1 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
 
 pub fn get_last_error() -> i32 {
     errno::errno().0
@@ -115,10 +131,10 @@ pub fn duplicate_string(arg: &OsStr) -> *mut c_char {
     }
 }
 
-const STRACE_LOGGER_FD: Fd = -779;
+const STRACE_LOGGER_FD: RawFd = -779;
 
 #[derive(Copy, Clone, Default)]
-pub struct StraceLogger(Fd);
+pub struct StraceLogger(RawFd);
 
 #[allow(dead_code)]
 pub fn strace_logger() -> StraceLogger {

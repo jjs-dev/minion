@@ -3,8 +3,7 @@ mod detect;
 mod v1;
 mod v2;
 
-use crate::linux::util::Fd;
-use std::{ffi::OsString, path::PathBuf};
+use std::{ffi::OsString, os::unix::io::RawFd, path::PathBuf};
 
 // used by crate::linux::check
 pub(in crate::linux) use detect::CgroupVersion;
@@ -12,16 +11,16 @@ pub(in crate::linux) use detect::CgroupVersion;
 /// Information, sufficient for joining a cgroup.
 pub(in crate::linux) enum JoinHandle {
     /// Fds of `tasks` file in each hierarchy.
-    V1(Vec<Fd>),
+    V1(Vec<RawFd>),
     /// Fd of `cgroup.procs` file in cgroup dir.
-    V2(Fd),
+    V2(RawFd),
 }
 
 impl JoinHandle {
-    fn with(&self, f: impl FnOnce(&mut dyn Iterator<Item = Fd>)) {
+    fn with(&self, f: impl FnOnce(&mut dyn Iterator<Item = RawFd>)) {
         let mut slice_iter;
         let mut once_iter;
-        let it: &mut dyn std::iter::Iterator<Item = Fd> = match &self {
+        let it: &mut dyn std::iter::Iterator<Item = RawFd> = match &self {
             Self::V1(handles) => {
                 slice_iter = handles.iter().copied();
                 &mut slice_iter

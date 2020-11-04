@@ -1,9 +1,9 @@
-use crate::linux::util::{err_exit, Fd};
+use crate::linux::util::err_exit;
 use libc::c_void;
-use std::io;
+use std::{io, os::unix::io::RawFd};
 
 pub struct LinuxReadPipe {
-    fd: Fd,
+    fd: RawFd,
 }
 
 impl std::io::Read for LinuxReadPipe {
@@ -19,7 +19,7 @@ impl std::io::Read for LinuxReadPipe {
 }
 
 impl LinuxReadPipe {
-    pub(crate) fn new(fd: Fd) -> LinuxReadPipe {
+    pub(crate) fn new(fd: RawFd) -> LinuxReadPipe {
         LinuxReadPipe { fd }
     }
 }
@@ -33,7 +33,7 @@ impl Drop for LinuxReadPipe {
 }
 
 pub struct LinuxWritePipe {
-    fd: Fd,
+    fd: RawFd,
 }
 
 impl Drop for LinuxWritePipe {
@@ -45,7 +45,7 @@ impl Drop for LinuxWritePipe {
 }
 
 impl LinuxWritePipe {
-    pub(crate) fn new(fd: Fd) -> LinuxWritePipe {
+    pub(crate) fn new(fd: RawFd) -> LinuxWritePipe {
         LinuxWritePipe { fd }
     }
 }
@@ -72,7 +72,10 @@ impl io::Write for LinuxWritePipe {
     }
 }
 
-pub(crate) fn setup_pipe(read_end: &mut Fd, write_end: &mut Fd) -> Result<(), crate::linux::Error> {
+pub(crate) fn setup_pipe(
+    read_end: &mut RawFd,
+    write_end: &mut RawFd,
+) -> Result<(), crate::linux::Error> {
     unsafe {
         let mut ends = [0; 2];
         let ret = libc::pipe2(ends.as_mut_ptr(), libc::O_CLOEXEC);

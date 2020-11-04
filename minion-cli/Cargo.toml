@@ -8,3 +8,4 @@ edition = "2018"
 minion = {path = ".."}
 structopt = "0.3.13"
 libc = "0.2.68"
+tokio = { version = "0.3.2", features = ["macros", "rt"] }

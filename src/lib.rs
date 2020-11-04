@@ -251,20 +251,21 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// May be returned when process was killed
-pub const EXIT_CODE_KILLED: i64 = 0x7eaddeadbeeff00d;
+/// Child process exit code.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct ExitCode(pub i64);
 
-/// Returned by [ChildProcess::wait_for_exit]
-///
-/// [ChildProcess::wait_fot_exit]: trait.ChildProcess.html#tymethod.wait_for_exit
-#[derive(Eq, PartialEq, Debug)]
-pub enum WaitOutcome {
-    /// Child process has exited during `wait_for_exit`
-    Exited,
-    /// Child process has exited before `wait_for_exit` and it is somehow already reported
-    AlreadyFinished,
-    /// Child process hasn't exited during `timeout` period
-    Timeout,
+impl ExitCode {
+    /// By convention program returns this code on success
+    pub const OK: ExitCode = ExitCode(0);
+    /// May be returned when process was killed
+    pub const KILLED: ExitCode = ExitCode(0x7eaddeadbeeff00d);
+}
+
+impl ExitCode {
+    pub fn is_success(self) -> bool {
+        self.0 == 0
+    }
 }
 
 /// Represents child process.
@@ -274,8 +275,18 @@ pub trait ChildProcess: Debug + 'static {
     type PipeIn: Write + Send + Sync + 'static;
     /// Represents pipe from isolated process to current
     type PipeOut: Read + Send + Sync + 'static;
-    /// Returns exit code, if process had exited by the moment of call, or None otherwise.
-    fn get_exit_code(&self) -> Result<Option<i64>, Self::Error>;
+    /// Future for `wait_for_exit` method.
+    /// If this function resolves to Err, than wait failed.
+    /// Otherwise child has finished and `get_exit_code` function will return
+    /// exit code.
+    type WaitFuture: std::future::Future<Output = Result<ExitCode, Self::Error>>
+        + Send
+        + Sync
+        + 'static;
+
+    /// Returns a future that resolves when process exited.
+    /// This function should be called once.
+    fn wait_for_exit(&mut self) -> Result<Self::WaitFuture, Self::Error>;
 
     /// Returns writeable stream, connected to child stdin
     ///
@@ -283,7 +294,6 @@ pub trait ChildProcess: Debug + 'static {
     /// Otherwise, None will be returned
     ///
     /// On all subsequent calls, None will be returned
-
     fn stdin(&mut self) -> Option<Self::PipeIn>;
 
     /// Returns readable stream, connected to child stdoutn
@@ -301,15 +311,4 @@ pub trait ChildProcess: Debug + 'static {
     ///
     /// On all subsequent calls, None will be returned
     fn stderr(&mut self) -> Option<Self::PipeOut>;
-
-    /// Waits for child process exit with timeout.
-    /// If timeout is None, `wait_for_exit` will block until child has exited
-    fn wait_for_exit(&self, timeout: Option<Duration>) -> Result<WaitOutcome, Self::Error>;
-
-    /// Refreshes information about process
-    fn poll(&self) -> Result<(), Self::Error>;
-
-    /// Returns whether child process has exited by the moment of call
-    /// This function doesn't blocks on waiting (see `wait_for_exit`).
-    fn is_finished(&self) -> Result<bool, Self::Error>;
 }

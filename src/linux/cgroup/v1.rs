@@ -1,9 +1,9 @@
 //! Implements Cgroup Driver for V1 cgroups
-use crate::linux::{cgroup::ResourceLimits, util::Fd};
-use std::os::unix::io::IntoRawFd;
+use crate::linux::cgroup::ResourceLimits;
+use std::os::unix::io::{IntoRawFd, RawFd};
 use std::path::PathBuf;
 impl super::Driver {
-    pub(super) fn setup_cgroups_v1(&self, limits: &ResourceLimits, cgroup_id: &str) -> Vec<Fd> {
+    pub(super) fn setup_cgroups_v1(&self, limits: &ResourceLimits, cgroup_id: &str) -> Vec<RawFd> {
         // configure cpuacct subsystem
         let cpuacct_cgroup_path = self.get_path_for_cgroup_legacy_subsystem("cpuacct", cgroup_id);
         std::fs::create_dir_all(&cpuacct_cgroup_path).expect("failed to create cpuacct cgroup");
