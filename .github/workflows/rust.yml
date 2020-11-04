@@ -33,38 +33,32 @@ jobs:
       - name: Run clippy
         run: |
           cargo clippy --workspace -- -Dclippy::all -Dwarnings
-  check-platform-support:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1.0.6
-        with:
-          toolchain: stable
-      - name: Remove cargo config
-        run: rm -rf .cargo
-      - name: Check musl
-        run: |
-          rustup target add x86_64-unknown-linux-musl
-          cargo check -p minion -p minion-ffi -p minion-cli --target x86_64-unknown-linux-musl
-  tests:
-    runs-on: ubuntu-latest
+  tests-linux:
+    strategy:
+      matrix:
+        os: 
+          - 'ubuntu-latest'
+          - 'macos-latest'
+        rust-target:
+          - 'x86_64-unknown-linux-gnu'
+          - 'x86_64-unknown-linux-musl'
+        cgroups:
+          - 'cgroup-v1'
+          - 'cgroup-v2'
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1.0.6
         with: 
-          toolchain: nightly
+          toolchain: stable
           override: true
-      - name: Compile tests
-        run: |
-          rm -rf .cargo
-          cd minion-tests 
-          TARGET=x86_64-unknown-linux-musl
-          rustup target add $TARGET
-          cargo build -Zunstable-options --out-dir=../out --target=$TARGET
-      - name: Run tests
-        run: |
-          sudo ./out/minion-tests --trace
-        timeout-minutes: 3 
+      - name: Test
+        run: bash ci/linux.sh
+        timeout-minutes: 10
+        env:
+          CI_TARGET: ${{ matrix.rust-target }}
+          CI_CGROUPS: ${{ matrix.cgroups }}
+          CI_OS: ${{ matrix.os }}
       - name: Collect logs
         if: always()
         run: |
@@ -75,6 +69,7 @@ jobs:
         with:
           path: /tmp/logs
           name: tests-trace
+
   nightly-checks:
     runs-on: ubuntu-latest
     steps:

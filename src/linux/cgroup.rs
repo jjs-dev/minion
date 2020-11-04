@@ -73,14 +73,14 @@ impl Driver {
     pub(in crate::linux) fn new(
         settings: &crate::linux::Settings,
     ) -> Result<Driver, crate::linux::Error> {
-        let cgroup_version = detect::CgroupVersion::detect();
+        // TODO: take cgroupfs as prefix
+        let (cgroup_version, cgroupfs_path) = detect::CgroupVersion::detect(None);
         let mut cgroup_prefix = Vec::new();
         for comp in settings.cgroup_prefix.components() {
             if let std::path::Component::Normal(n) = comp {
                 cgroup_prefix.push(n.to_os_string());
             }
         }
-        let cgroupfs_path = "/sys/fs/cgroup".into();
         Ok(Driver {
             version: cgroup_version,
             cgroup_prefix,
@@ -92,7 +92,7 @@ impl Driver {
         cgroup_id: &str,
         limits: &ResourceLimits,
     ) -> JoinHandle {
-        match CgroupVersion::detect() {
+        match self.version {
             CgroupVersion::V1 => JoinHandle::V1(self.setup_cgroups_v1(limits, cgroup_id)),
             CgroupVersion::V2 => JoinHandle::V2(self.setup_cgroups_v2(limits, cgroup_id)),
         }

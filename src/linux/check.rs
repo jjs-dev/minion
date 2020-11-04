@@ -78,7 +78,7 @@ fn find_lca<'a>(a: &'a [String], b: &'a [String]) -> &'a [String] {
 
 /// `crate::check()` on linux
 pub fn check() -> Result<(), String> {
-    if CgroupVersion::detect() == CgroupVersion::V1 {
+    if CgroupVersion::detect(None).0 == CgroupVersion::V1 {
         if unsafe { libc::geteuid() } != 0 {
             return Err("Root is required to use legacy cgroups".to_string());
         }

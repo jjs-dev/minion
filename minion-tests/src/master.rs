@@ -84,6 +84,11 @@ fn execute_single_test(case: &dyn TestCase, exec_opts: ExecuteOptions) -> Outcom
     };
 
     cmd.env_clear();
+    if cfg!(minion_ci) {
+        if let Ok(cgroups) = std::env::var("CI_CGROUPS") {
+            cmd.env("CI_CGROUPS", cgroups);
+        }
+    }
     cmd.env(crate::WORKER_ENV_NAME, "1");
     cmd.env("TEST", case.name());
     let status = cmd.status().unwrap();
