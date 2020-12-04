@@ -258,9 +258,10 @@ impl Backend for LinuxBackend {
 }
 
 impl LinuxBackend {
+    #[allow(clippy::unnecessary_wraps)]
     pub fn new(settings: Settings) -> Result<LinuxBackend, Error> {
         self::check::run_all_feature_checks();
-        let cgroup_driver = Arc::new(cgroup::Driver::new(&settings)?);
+        let cgroup_driver = Arc::new(cgroup::Driver::new(&settings));
         Ok(LinuxBackend {
             settings,
             cgroup_driver,
