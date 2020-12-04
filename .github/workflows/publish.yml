@@ -1,0 +1,43 @@
+name: Publish
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build image
+        env:
+          DOCKER_BUILDKIT: 1
+        # TODO: cache
+        run: docker build -t minion-cli .
+      - name: Export image to tarball
+        run: docker save -o /tmp/image minion-cli
+      - name: Publish as artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: minion-cli-image
+          path: /tmp/image
+          retention-days: 3
+  publish-image:
+    needs:
+      - build-image
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v2
+        with:
+          name: minion-cli-image
+      - name: Upload image
+        run: |
+          docker load < ./image
+          echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
+          docker tag minion-cli ghcr.io/jjs-dev/minion-cli:latest
+          docker push ghcr.io/jjs-dev/minion-cli:latest
