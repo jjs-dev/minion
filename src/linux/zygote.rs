@@ -310,9 +310,12 @@ pub(in crate::linux) fn start_zygote(
                 .map(|never| match never {}),
             }
         }
-        nix::unistd::ForkResult::Parent { .. } => {
-            start_zygote_caller(return_allowed_r, return_allowed_w, jail_options, socket)
-        }
+        nix::unistd::ForkResult::Parent { .. } => Ok(start_zygote_caller(
+            return_allowed_r,
+            return_allowed_w,
+            jail_options,
+            socket,
+        )),
     }
 }
 
@@ -322,7 +325,7 @@ fn start_zygote_caller(
     return_allowed_w: RawFd,
     jail_options: JailOptions,
     socket: Socket,
-) -> Result<ZygoteStartupInfo, Error> {
+) -> ZygoteStartupInfo {
     let mut logger = crate::linux::util::strace_logger();
     write!(logger, "sandbox {}: thread A (main)", &jail_options.jail_id).unwrap();
 
@@ -334,11 +337,10 @@ fn start_zygote_caller(
     nix::unistd::close(return_allowed_r).unwrap();
     nix::unistd::close(return_allowed_w).unwrap();
     nix::unistd::close(jail_options.watchdog_chan).unwrap();
-    let startup_info = jail_common::ZygoteStartupInfo {
+    jail_common::ZygoteStartupInfo {
         socket,
         zygote_pid: i32::from_ne_bytes(zygote_pid_bytes),
-    };
-    Ok(startup_info)
+    }
 }
 
 /// Thread B is zygote initialization helper, external to sandbox.
