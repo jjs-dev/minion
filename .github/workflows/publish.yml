@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - master
-      # do not forget to remove it some time
-      - docker
   pull_request:
 
 env:
