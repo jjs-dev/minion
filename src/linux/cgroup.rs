@@ -70,7 +70,7 @@ pub(in crate::linux) struct ResourceLimits {
 
 impl Driver {
     pub(in crate::linux) fn new(settings: &crate::linux::Settings) -> Driver {
-        // TODO: take cgroupfs as prefix
+        // TODO: take cgroupfs as setting
         let (cgroup_version, cgroupfs_path) = detect::CgroupVersion::detect(None);
         let mut cgroup_prefix = Vec::new();
         for comp in settings.cgroup_prefix.components() {
