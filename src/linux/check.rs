@@ -17,7 +17,14 @@ fn get_current_cgroup_path() -> Vec<String> {
 }
 
 fn get_sandbox_chgroup_path() -> Vec<String> {
-    vec!["jjs".to_string()]
+    crate::linux::Settings::default()
+        .cgroup_prefix
+        .to_str()
+        .unwrap()
+        .split('/')
+        .skip(1)
+        .map(ToString::to_string)
+        .collect()
 }
 
 fn check_has_cgroup_access(cgroup: &[String]) -> Result<(), String> {

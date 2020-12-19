@@ -29,16 +29,6 @@ impl CgroupVersion {
         } else {
             CgroupVersion::V1
         };
-
-        if cfg!(minion_ci) {
-            let expected_version = match std::env::var("CI_CGROUPS").unwrap().as_str() {
-                "cgroup-v1" => CgroupVersion::V1,
-                "cgroup-v2" => CgroupVersion::V2,
-                _ => panic!(),
-            };
-
-            assert_eq!(vers, expected_version);
-        }
         (vers, path)
     }
 }
