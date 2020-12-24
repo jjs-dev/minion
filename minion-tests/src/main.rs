@@ -63,6 +63,7 @@ pub trait TestCase: Send + Sync {
 static WORKER_ENV_NAME: &str = "__MINION_ROLE_IS_WORKER__";
 static TEST_ENV_NAME: &str = "__MINION_ROLE_IS_TEST__";
 fn main() {
+    tracing_subscriber::fmt().init();
     let test_cases = &*tests::TESTS;
     let role = get_role();
     match role {

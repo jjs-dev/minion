@@ -29,6 +29,7 @@ impl CgroupVersion {
         } else {
             CgroupVersion::V1
         };
+        tracing::info!(mount_point = %path.display(), version = ?vers, "detected cgroups");
         (vers, path)
     }
 }

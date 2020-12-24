@@ -105,6 +105,9 @@ struct ExecOpt {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
     let options: ExecOpt = ExecOpt::from_args();
     if options.dump_argv {
         println!("{:#?}", options);
