@@ -40,7 +40,6 @@ jobs:
           - 'ubuntu-20.04'
           - 'macos-latest'
         rust-target:
-          - 'x86_64-unknown-linux-gnu'
           - 'x86_64-unknown-linux-musl'
         cgroups:
           - 'cgroup-v1'
@@ -68,7 +67,7 @@ jobs:
         if: always()
         with:
           path: /tmp/logs
-          name: tests-trace
+          name: tests-trace-${{ matrix.cgroups }}-${{ matrix.os }}
 
   nightly-checks:
     runs-on: ubuntu-20.04

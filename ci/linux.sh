@@ -17,10 +17,6 @@ if [[ $CI_OS == "macos-latest" ]]; then
     echo "Skipping: cgroup v1 does not need virtualization"
     exit 0
   fi
-  if [[ $CI_TARGET == "x86_64-unknown-linux-gnu" ]]; then
-    echo "Skipping: we will not run test on gnu targets anyway"
-    exit 0
-  fi
 fi
 
 echo "::group::Preparing"
@@ -45,7 +41,11 @@ EOF
   echo "::group::Installing rust"
   sudo vagrant ssh --command "curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable"
   echo "::group::Entering VM"
-  sudo vagrant ssh --command "bash -c 'cd /vagrant && CI_OS=$CI_OS CI_CGROUPS=$CI_CGROUPS CI_TARGET=$CI_TARGET CI_VM=1 bash ci/linux.sh'"
+  sudo vagrant ssh --command "bash -c 'cd /vagrant && CI_OS=$CI_OS CI_CGROUPS=$CI_CGROUPS CI_TARGET=$CI_TARGET CI_VM=1 bash ci/linux.sh'" 
+  echo "Host: sleeping a bit to ensure files are synchronized"
+  sleep 10
+  echo "Current directory after VM finish"
+  ls .
   exit 0
 fi
 
@@ -64,12 +64,12 @@ rustflags=["--cfg", "minion_ci"]' > .cargo/config
 export RUSTC_BOOTSTRAP=1
 cargo build -p minion-tests -Zunstable-options --out-dir=./out --target=$CI_TARGET
 
-echo "::group::Skip running if needed"
-if [[ $CI_TARGET == "x86_64-unknown-linux-gnu" ]]; then
-  echo "skipping: static binary required on linux"
-  exit 0
-fi
-
 echo "::group::Running tests"
 sudo --preserve-env ./out/minion-tests --trace
-
+echo "::group::Finalize"
+echo "Current directory after running tests"
+ls .
+if [ -z "${CI_VM+set}" ]; then
+  echo "VM: sleeping a bit to ensure files are synchronized"
+  sleep 10
+fi
