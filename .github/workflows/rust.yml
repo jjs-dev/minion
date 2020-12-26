@@ -67,7 +67,7 @@ jobs:
         if: always()
         with:
           path: /tmp/logs
-          name: tests-trace
+          name: tests-trace-${{ matrix.cgroups }}-${{ matrix.os }}
 
   nightly-checks:
     runs-on: ubuntu-20.04
