@@ -17,10 +17,6 @@ if [[ $CI_OS == "macos-latest" ]]; then
     echo "Skipping: cgroup v1 does not need virtualization"
     exit 0
   fi
-  if [[ $CI_TARGET == "x86_64-unknown-linux-gnu" ]]; then
-    echo "Skipping: we will not run test on gnu targets anyway"
-    exit 0
-  fi
 fi
 
 echo "::group::Preparing"
@@ -63,12 +59,6 @@ rustflags=["--cfg", "minion_ci"]' > .cargo/config
 
 export RUSTC_BOOTSTRAP=1
 cargo build -p minion-tests -Zunstable-options --out-dir=./out --target=$CI_TARGET
-
-echo "::group::Skip running if needed"
-if [[ $CI_TARGET == "x86_64-unknown-linux-gnu" ]]; then
-  echo "skipping: static binary required on linux"
-  exit 0
-fi
 
 echo "::group::Running tests"
 sudo --preserve-env ./out/minion-tests --trace
