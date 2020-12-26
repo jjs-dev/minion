@@ -41,7 +41,9 @@ EOF
   echo "::group::Installing rust"
   sudo vagrant ssh --command "curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable"
   echo "::group::Entering VM"
-  sudo vagrant ssh --command "bash -c 'cd /vagrant && CI_OS=$CI_OS CI_CGROUPS=$CI_CGROUPS CI_TARGET=$CI_TARGET CI_VM=1 bash ci/linux.sh'"
+  sudo vagrant ssh --command "bash -c 'cd /vagrant && CI_OS=$CI_OS CI_CGROUPS=$CI_CGROUPS CI_TARGET=$CI_TARGET CI_VM=1 bash ci/linux.sh'" 
+  echo "Host: sleeping a bit to ensure files are synchronized"
+  sleep 10
   echo "Current directory after VM finish"
   ls .
   exit 0
@@ -67,3 +69,7 @@ sudo --preserve-env ./out/minion-tests --trace
 echo "::group::Finalize"
 echo "Current directory after running tests"
 ls .
+if [ -z "${CI_VM+set}" ]; then
+  echo "VM: sleeping a bit to ensure files are synchronized"
+  sleep 10
+fi
