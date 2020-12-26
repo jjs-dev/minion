@@ -111,13 +111,13 @@ fn get_filter(matches: &clap::ArgMatches) -> Box<dyn Fn(&'static dyn TestCase) -
 }
 
 fn check_static() {
-    let file_output = std::process::Command::new("file")
+    let ldd_output = std::process::Command::new("ldd")
         .arg(std::env::current_exe().unwrap())
         .output()
-        .expect("failed to execute fail");
-    assert!(file_output.status.success());
-    let file_output = String::from_utf8_lossy(&file_output.stdout);
-    if file_output.contains("dynamically linked") {
+        .expect("failed to execute file");
+    assert!(ldd_output.status.success());
+    let ldd_output = String::from_utf8_lossy(&ldd_output.stdout);
+    if !ldd_output.contains("statically linked") {
         panic!(
             "minion-tests must be static executable; \
         recompile for x86_64-unknown-linux-musl"

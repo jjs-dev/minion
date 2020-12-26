@@ -6,7 +6,7 @@ echo "Operating system: $CI_OS"
 
 echo "this is hack, ignore this file" >> ./stracez-dummy 
 
-if [[ $CI_OS == "ubuntu-latest" ]]; then
+if [[ $CI_OS == "ubuntu-20.04" ]]; then
   if [[ $CI_CGROUPS == "cgroup-v2" ]]; then
     echo "Skipping: cgroup v2 runs in macos"
     exit 0
