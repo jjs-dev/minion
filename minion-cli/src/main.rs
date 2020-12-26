@@ -82,6 +82,10 @@ struct ExecOpt {
     #[structopt(long = "dump-generated-security-settings")]
     dump_minion_params: bool,
 
+    /// Skip system check
+    #[structopt(long)]
+    skip_system_check: bool,
+
     /// Isolation root
     #[structopt(short = "r", long = "root")]
     isolation_root: String,
@@ -105,9 +109,11 @@ async fn main() {
     if options.dump_argv {
         println!("{:#?}", options);
     }
-    if let Some(err) = minion::check() {
-        eprintln!("Error: {}", err);
-        std::process::exit(1);
+    if !options.skip_system_check {
+        if let Some(err) = minion::check() {
+            eprintln!("Error: {}", err);
+            std::process::exit(1);
+        }
     }
     let backend = match minion::erased::setup() {
         Ok(b) => b,
