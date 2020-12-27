@@ -57,7 +57,8 @@ rustup target add $CI_TARGET
 if [[ $CI_CGROUPS == "cgroup-v2" ]]; then
   echo "::group::Some cgroup hacks"
   sudo mkdir /sys/fs/cgroup/minion
-  echo "+cpu +memory +pids" | sudo tee /sys/fs/cgroup/cgroup.subtree_control | sudo tee /sys/fs/cgroup/minion/cgroup.subtree_control
+  echo "+cpu +memory +pids" | sudo tee /sys/fs/cgroup/cgroup.subtree_control
+  echo "+cpu +memory +pids" | sudo tee /sys/fs/cgroup/minion/cgroup.subtree_control
 fi
 
 echo "::group::Compiling tests"
