@@ -16,8 +16,8 @@ fn get_current_cgroup_path() -> Vec<String> {
     pathname.split('/').map(ToString::to_string).collect()
 }
 
-fn get_sandbox_chgroup_path() -> Vec<String> {
-    crate::linux::Settings::default()
+fn get_sandbox_chgroup_path(settings: &crate::linux::Settings) -> Vec<String> {
+    settings
         .cgroup_prefix
         .to_str()
         .unwrap()
@@ -84,24 +84,33 @@ fn find_lca<'a>(a: &'a [String], b: &'a [String]) -> &'a [String] {
 }
 
 /// `crate::check()` on linux
-pub fn check() -> Result<(), String> {
-    if CgroupVersion::detect(None).0 == CgroupVersion::V1 {
-        if unsafe { libc::geteuid() } != 0 {
-            return Err("Root is required to use legacy cgroups".to_string());
+pub fn check(settings: &crate::linux::Settings, res: &mut crate::check::CheckResult) {
+    if !pidfd_supported() {
+        res.warning("PID file descriptors not supported")
+    }
+    let cgroup_info = CgroupVersion::detect(&settings.cgroupfs);
+    let cgroup_info = match cgroup_info {
+        Ok(inf) => inf,
+        Err(err) => {
+            res.error(&format!("Cgroupfs not detected: {}", err));
+            return;
         }
-        return Ok(());
+    };
+    if cgroup_info.0 == CgroupVersion::V1 {
+        if unsafe { libc::geteuid() } != 0 {
+            res.error("Root is required to use legacy cgroups");
+        }
+        return;
     }
 
-    let sandbox_group = get_sandbox_chgroup_path();
+    let sandbox_group = get_sandbox_chgroup_path(settings);
     let current_group = get_current_cgroup_path();
     let lca = find_lca(&sandbox_group, &current_group);
     for group in &[&sandbox_group, lca] {
         if let Err(msg) = check_has_cgroup_access(&group) {
-            return Err(format!("Access denied to cgroup {:?}: {}", group, msg));
+            res.error(&format!("Access denied to cgroup {:?}: {}", group, msg));
         }
     }
-
-    Ok(())
 }
 
 /// Checks if the kernel has support for PID file descriptors.

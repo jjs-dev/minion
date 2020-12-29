@@ -69,20 +69,22 @@ pub(in crate::linux) struct ResourceLimits {
 }
 
 impl Driver {
-    pub(in crate::linux) fn new(settings: &crate::linux::Settings) -> Driver {
+    pub(in crate::linux) fn new(
+        settings: &crate::linux::Settings,
+    ) -> Result<Driver, crate::linux::Error> {
         // TODO: take cgroupfs as setting
-        let (cgroup_version, cgroupfs_path) = detect::CgroupVersion::detect(None);
+        let (cgroup_version, cgroupfs_path) = detect::CgroupVersion::detect(&settings.cgroupfs)?;
         let mut cgroup_prefix = Vec::new();
         for comp in settings.cgroup_prefix.components() {
             if let std::path::Component::Normal(n) = comp {
                 cgroup_prefix.push(n.to_os_string());
             }
         }
-        Driver {
+        Ok(Driver {
             cgroupfs_path,
             cgroup_prefix,
             version: cgroup_version,
-        }
+        })
     }
     pub(in crate::linux) fn create_group(
         &self,
