@@ -1,8 +1,4 @@
 /// This functions checks for system configurations issues.
-/// If it returns None, minion will probably work.
-/// If it returns Some(s), s is human-readable string
-/// describing these problems. It should be shown to administrtor,
-/// so that they can fix this problem.
 pub fn check(res: &mut CheckResult) {
     #[cfg(target_os = "linux")]
     {
@@ -11,7 +7,7 @@ pub fn check(res: &mut CheckResult) {
 }
 
 /// Storage for problems reported by `minion::check` and similar
-/// functions.
+/// functions. These problems should be fixed by system administrator.
 #[derive(Debug, Default)]
 pub struct CheckResult {
     errors: Vec<String>,
