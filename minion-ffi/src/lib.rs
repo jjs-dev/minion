@@ -1,14 +1,61 @@
 #![cfg_attr(minion_nightly, feature(unsafe_block_in_unsafe_fn))]
 #![cfg_attr(minion_nightly, warn(unsafe_op_in_unsafe_fn))]
-use minion::{self};
+// use minion::{self};
 use std::{
+    alloc::GlobalAlloc,
     ffi::{CStr, OsStr, OsString},
     mem::{self},
-    os::raw::c_char,
+    os::raw::{c_char, c_void},
 };
 
+static mut CAPTURE_ERRORS: bool = false;
+
+/// Operation status.
+/// It consists of status code and
+/// optionally details.
+#[repr(C)]
+pub struct Status {
+    pub code: StatusCode,
+    // owned anyhow::Error
+    // TODO: can this be safer?
+    /// If not NULL, then additional details are available.
+    /// Use `minion_status_*` functions to inspect then.
+    pub details: *mut c_void,
+}
+
+impl Status {
+    fn from_code(c: StatusCode) -> Self {
+        assert_ne!(c, StatusCode::Minion);
+        Status {
+            code: c,
+            details: std::ptr::null_mut(),
+        }
+    }
+
+    fn from_err(err: anyhow::Error) -> Self {
+        Status {
+            code: StatusCode::Minion,
+            details: unsafe {
+                if CAPTURE_ERRORS {
+                    std::mem::transmute(err)
+                } else {
+                    std::ptr::null_mut()
+                }
+            },
+        }
+    }
+
+    fn err(&self) -> Option<&anyhow::Error> {
+        if self.details.is_null() {
+            return None;
+        }
+        unsafe { Some(&*(&self.details as *const *mut c_void as *const anyhow::Error)) }
+    }
+}
+
 #[repr(i32)]
-pub enum ErrorCode {
+#[derive(PartialEq, Eq, Debug)]
+pub enum StatusCode {
     /// operation completed successfully
     Ok,
     /// passed arguments didn't pass some basic checks
@@ -25,11 +72,30 @@ pub enum ErrorCode {
 /// Returns char const* pointer with static lifetime. This pointer must not be freed.
 /// Description is guaranteed to be null-terminated ASCII string
 #[no_mangle]
-pub extern "C" fn minion_describe_status(error_code: ErrorCode) -> *const u8 {
-    match error_code {
-        ErrorCode::Ok => b"ok\0".as_ptr(),
-        ErrorCode::InvalidInput => b"invalid input\0".as_ptr(),
-        ErrorCode::Minion => b"minion error\0".as_ptr(),
+pub extern "C" fn minion_describe_status_code(status_code: StatusCode) -> *const u8 {
+    match status_code {
+        StatusCode::Ok => b"ok\0".as_ptr(),
+        StatusCode::InvalidInput => b"invalid input\0".as_ptr(),
+        StatusCode::Minion => b"minion error\0".as_ptr(),
+    }
+}
+
+/// Get string message for a given Status. If `details` is null, nullptr is returned.
+/// Otherwise this function allocated and returned null-terminated string using malloc.
+/// Use `free` to deallocate returned string
+#[no_mangle]
+pub extern "C" fn minion_status_get_message(status: &Status) -> *const u8 {
+    let err = match status.err() {
+        Some(e) => e,
+        None => return std::ptr::null(),
+    };
+    let message = format!("{:#}", err);
+    unsafe {
+        let buf = std::alloc::System
+            .alloc(std::alloc::Layout::from_size_align(message.len() + 1, 1).unwrap());
+        std::ptr::copy(message.as_ptr(), buf, message.len());
+        buf.add(message.len()).write(0);
+        buf
     }
 }
 
@@ -54,28 +120,34 @@ pub struct Backend(Box<dyn minion::erased::Backend>);
 /// # Safety
 /// Must be called once
 /// Must be called before any library usage
+/// If `capture_errors` is true, returned `Status` objects are allowed
+/// to contain details object. Take care to call `minion_status_free` on all
+/// `Status`-es to prevent memory leaks.
 #[no_mangle]
 #[must_use]
-pub unsafe extern "C" fn minion_lib_init() -> ErrorCode {
+pub unsafe extern "C" fn minion_lib_init(capture_errors: bool) -> Status {
     std::panic::set_hook(Box::new(|info| {
         eprintln!("[minion-ffi] PANIC: {} ({:?})", &info, info);
         std::process::abort();
     }));
-    ErrorCode::Ok
+    unsafe {
+        CAPTURE_ERRORS = capture_errors;
+    }
+    Status::from_code(StatusCode::Ok)
 }
 
 /// Create backend, default for target platform
 #[no_mangle]
 #[must_use]
-pub extern "C" fn minion_backend_create(out: &mut *mut Backend) -> ErrorCode {
+pub extern "C" fn minion_backend_create(out: &mut *mut Backend) -> Status {
     let backend = match minion::erased::setup() {
         Ok(b) => b,
-        Err(_) => return ErrorCode::Minion,
+        Err(err) => return Status::from_err(err),
     };
     let backend = Backend(backend);
     let backend = Box::new(backend);
     *out = Box::into_raw(backend);
-    ErrorCode::Ok
+    Status::from_code(StatusCode::Ok)
 }
 
 /// Drop backend
@@ -83,10 +155,10 @@ pub extern "C" fn minion_backend_create(out: &mut *mut Backend) -> ErrorCode {
 /// `b` must be pointer to Backend, allocated by `minion_backend_create`
 #[no_mangle]
 #[must_use]
-pub unsafe extern "C" fn minion_backend_free(b: *mut Backend) -> ErrorCode {
+pub unsafe extern "C" fn minion_backend_free(b: *mut Backend) -> Status {
     let b = unsafe { Box::from_raw(b) };
     mem::drop(b);
-    ErrorCode::Ok
+    Status::from_code(StatusCode::Ok)
 }
 
 #[repr(C)]
@@ -111,18 +183,15 @@ pub struct Sandbox(Box<dyn minion::erased::Sandbox>);
 /// # Safety
 /// `out` must be valid
 #[no_mangle]
-pub unsafe extern "C" fn minion_sandbox_check_cpu_tle(
-    sandbox: &Sandbox,
-    out: *mut bool,
-) -> ErrorCode {
+pub unsafe extern "C" fn minion_sandbox_check_cpu_tle(sandbox: &Sandbox, out: *mut bool) -> Status {
     match sandbox.0.check_cpu_tle() {
         Ok(st) => {
             unsafe {
                 out.write(st);
             }
-            ErrorCode::Ok
+            Status::from_code(StatusCode::Ok)
         }
-        Err(_) => ErrorCode::Minion,
+        Err(err) => Status::from_err(err),
     }
 }
 
@@ -132,23 +201,23 @@ pub unsafe extern "C" fn minion_sandbox_check_cpu_tle(
 pub unsafe extern "C" fn minion_sandbox_check_real_tle(
     sandbox: &Sandbox,
     out: *mut bool,
-) -> ErrorCode {
+) -> Status {
     match sandbox.0.check_real_tle() {
         Ok(st) => {
             unsafe {
                 out.write(st);
             }
-            ErrorCode::Ok
+            Status::from_code(StatusCode::Ok)
         }
-        Err(_) => ErrorCode::Minion,
+        Err(err) => Status::from_err(err),
     }
 }
 
 #[no_mangle]
-pub extern "C" fn minion_sandbox_kill(sandbox: &Sandbox) -> ErrorCode {
+pub extern "C" fn minion_sandbox_kill(sandbox: &Sandbox) -> Status {
     match sandbox.0.kill() {
-        Ok(_) => ErrorCode::Ok,
-        Err(_) => ErrorCode::Minion,
+        Ok(_) => Status::from_code(StatusCode::Ok),
+        Err(err) => Status::from_err(err),
     }
 }
 
@@ -160,7 +229,7 @@ pub unsafe extern "C" fn minion_sandbox_create(
     backend: &Backend,
     options: SandboxOptions,
     out: &mut *mut Sandbox,
-) -> ErrorCode {
+) -> Status {
     let mut exposed_paths = Vec::new();
     unsafe {
         let mut p = options.shared_directories;
@@ -197,17 +266,17 @@ pub unsafe extern "C" fn minion_sandbox_create(
 
     let dw = Sandbox(d);
     *out = Box::into_raw(Box::new(dw));
-    ErrorCode::Ok
+    Status::from_code(StatusCode::Ok)
 }
 
 /// # Safety
 /// `sandbox` must be pointer, returned by `minion_sandbox_create`.
 #[no_mangle]
 #[must_use]
-pub unsafe extern "C" fn minion_sandbox_free(sandbox: *mut Sandbox) -> ErrorCode {
+pub unsafe extern "C" fn minion_sandbox_free(sandbox: *mut Sandbox) -> Status {
     let b = unsafe { Box::from_raw(sandbox) };
     mem::drop(b);
-    ErrorCode::Ok
+    Status::from_code(StatusCode::Ok)
 }
 
 #[repr(C)]
@@ -282,7 +351,7 @@ pub unsafe extern "C" fn minion_cp_spawn(
     backend: &Backend,
     options: ChildProcessOptions,
     out: &mut *mut ChildProcess,
-) -> ErrorCode {
+) -> Status {
     let mut arguments = Vec::new();
     unsafe {
         let mut p = options.argv;
@@ -326,7 +395,7 @@ pub unsafe extern "C" fn minion_cp_spawn(
     let cp = ChildProcess(cp);
     let cp = Box::new(cp);
     *out = Box::into_raw(cp);
-    ErrorCode::Ok
+    Status::from_code(StatusCode::Ok)
 }
 
 /// Wait for process exit, with timeout.
@@ -339,7 +408,7 @@ pub unsafe extern "C" fn minion_cp_wait(
     cp: &mut ChildProcess,
     timeout: Option<&TimeSpec>,
     out: *mut WaitOutcome,
-) -> ErrorCode {
+) -> Status {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -348,35 +417,33 @@ pub unsafe extern "C" fn minion_cp_wait(
         .map(|timeout| std::time::Duration::new(timeout.seconds.into(), timeout.nanoseconds));
     let fut = match cp.0.wait_for_exit() {
         Ok(fut) => fut,
-        Err(_) => return ErrorCode::Minion,
+        Err(err) => return Status::from_err(err),
     };
     let outcome = if let Some(timeout) = timeout {
         match rt.block_on(tokio::time::timeout(timeout, fut)) {
-            Ok(res) => {
-                if res.is_err() {
-                    return ErrorCode::Minion;
-                }
-                WaitOutcome::Exited
+            Ok(Ok(_)) => WaitOutcome::Exited,
+            Ok(Err(err)) => {
+                return Status::from_err(err);
             }
             Err(_elapsed) => WaitOutcome::Timeout,
         }
     } else {
         match rt.block_on(fut) {
             Ok(_) => WaitOutcome::Exited,
-            Err(_) => return ErrorCode::Minion,
+            Err(err) => return Status::from_err(err),
         }
     };
     unsafe {
         out.write(outcome);
     }
-    ErrorCode::Ok
+    Status::from_code(StatusCode::Ok)
 }
 
 /// # Safety
 /// `cp` must be valid pointer to ChildProcess object, allocated by `minion_cp_spawn`
 #[no_mangle]
 #[must_use]
-pub unsafe extern "C" fn minion_cp_free(cp: *mut ChildProcess) -> ErrorCode {
+pub unsafe extern "C" fn minion_cp_free(cp: *mut ChildProcess) -> Status {
     mem::drop(unsafe { Box::from_raw(cp) });
-    ErrorCode::Ok
+    Status::from_code(StatusCode::Ok)
 }
