@@ -8,6 +8,7 @@ edition = "2018"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
+anyhow = "1.0.37"
 minion = {path = ".."}
 tokio = {version = "0.3.2", features = ["rt", "time"]}
 
