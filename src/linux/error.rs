@@ -22,6 +22,8 @@ pub enum Error {
     Sandbox,
     #[error("unknown error")]
     Unknown,
+    #[error("Cgroup detection failure")]
+    Cgroups,
 }
 
 impl Error {
@@ -32,6 +34,7 @@ impl Error {
             Error::Io { .. } => ErrorKind::System,
             Error::Sandbox => ErrorKind::Sandbox,
             Error::Unknown => ErrorKind::System,
+            Error::Cgroups => ErrorKind::System,
         }
     }
 

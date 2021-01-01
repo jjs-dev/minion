@@ -113,9 +113,11 @@ async fn main() {
         println!("{:#?}", options);
     }
     if !options.skip_system_check {
-        if let Some(err) = minion::check() {
-            eprintln!("Error: {}", err);
-            std::process::exit(1);
+        let mut res = minion::CheckResult::new();
+        minion::check(&mut res);
+        if res.has_errors() {
+            eprintln!("{}", res);
+            // TODO: option to abort
         }
     }
     let backend = match minion::erased::setup() {

@@ -14,6 +14,9 @@ pub mod linux;
 
 pub mod erased;
 
+mod check;
+pub use check::{check, CheckResult};
+
 use serde::{Deserialize, Serialize};
 
 #[cfg(target_os = "linux")]
@@ -25,21 +28,6 @@ use std::{
     io::{Read, Write},
     time::Duration,
 };
-
-/// This functions checks for system configurations issues.
-/// If it returns None, minion will probably work.
-/// If it returns Some(s), s is human-readable string
-/// describing these problems. It should be shown to administrtor,
-/// so that they can fix this problem.
-pub fn check() -> Option<String> {
-    #[cfg(target_os = "linux")]
-    {
-        if let Err(err) = linux::check::check() {
-            return Some(err);
-        }
-    }
-    None
-}
 
 /// Represents way of isolation
 pub trait Backend: Debug + Send + Sync {
