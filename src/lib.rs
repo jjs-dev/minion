@@ -151,17 +151,17 @@ impl InputSpecification {
         Self(InputSpecificationData::Pipe)
     }
 
-    /// # Safety
+    /// # Correctness
     /// - Handle must not be used since passing to this function
     /// - Handle must be valid
-    pub unsafe fn handle(h: u64) -> Self {
+    pub fn handle(h: u64) -> Self {
         Self(InputSpecificationData::Handle(h))
     }
 
-    /// # Safety
+    /// # Correctness
     /// See requirements of `handle`
-    pub unsafe fn handle_of<T: std::os::unix::io::IntoRawFd>(obj: T) -> Self {
-        unsafe { Self::handle(obj.into_raw_fd() as u64) }
+    pub fn handle_of<T: std::os::unix::io::IntoRawFd>(obj: T) -> Self {
+        Self::handle(obj.into_raw_fd() as u64)
     }
 }
 
@@ -196,17 +196,17 @@ impl OutputSpecification {
         Self(OutputSpecificationData::Buffer(None))
     }
 
-    /// # Safety
+    /// # Correctness
     /// - Handle must not be used since passing to this function
     /// - Handle must be valid
-    pub unsafe fn handle(h: u64) -> Self {
+    pub fn handle(h: u64) -> Self {
         Self(OutputSpecificationData::Handle(h))
     }
 
-    /// # Safety
+    /// # Correctness
     /// See requirements of `handle`
-    pub unsafe fn handle_of<T: std::os::unix::io::IntoRawFd>(obj: T) -> Self {
-        unsafe { Self::handle(obj.into_raw_fd() as u64) }
+    pub fn handle_of<T: std::os::unix::io::IntoRawFd>(obj: T) -> Self {
+        Self::handle(obj.into_raw_fd() as u64)
     }
 }
 
