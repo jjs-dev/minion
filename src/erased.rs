@@ -7,7 +7,7 @@
 use futures_util::{FutureExt, TryFutureExt};
 
 /// Type-erased `Sandbox`
-pub trait Sandbox: std::fmt::Debug {
+pub trait Sandbox: std::fmt::Debug + Send + Sync + 'static {
     fn id(&self) -> String;
     fn check_cpu_tle(&self) -> anyhow::Result<bool>;
     fn check_real_tle(&self) -> anyhow::Result<bool>;
@@ -51,7 +51,7 @@ impl<S: crate::Sandbox> Sandbox for S {
 }
 
 /// Type-erased `ChildProcess`
-pub trait ChildProcess {
+pub trait ChildProcess: Send + Sync + 'static {
     fn stdin(&mut self) -> Option<Box<dyn std::io::Write + Send + Sync + 'static>>;
     fn stdout(&mut self) -> Option<Box<dyn std::io::Read + Send + Sync + 'static>>;
     fn stderr(&mut self) -> Option<Box<dyn std::io::Read + Send + Sync + 'static>>;
@@ -88,7 +88,7 @@ impl<C: crate::ChildProcess> ChildProcess for C {
 }
 
 /// Type-erased `Backend`
-pub trait Backend {
+pub trait Backend: Send + Sync + 'static {
     fn new_sandbox(&self, options: crate::SandboxOptions) -> anyhow::Result<Box<dyn Sandbox>>;
     fn spawn(&self, options: ChildProcessOptions) -> anyhow::Result<Box<dyn ChildProcess>>;
 }

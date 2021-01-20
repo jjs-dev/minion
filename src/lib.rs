@@ -30,7 +30,7 @@ use std::{
 };
 
 /// Represents way of isolation
-pub trait Backend: Debug + Send + Sync {
+pub trait Backend: Debug + Send + Sync + 'static {
     type Error: StdError + Send + Sync + 'static;
     type Sandbox: Sandbox<Error = Self::Error>;
     type ChildProcess: ChildProcess<Error = Self::Error>;
@@ -108,7 +108,7 @@ impl SandboxOptions {
 }
 
 /// Represents highly-isolated sandbox
-pub trait Sandbox: Clone + Debug + 'static {
+pub trait Sandbox: Clone + Debug + Send + Sync + 'static {
     type Error: StdError + Send + Sync + 'static;
     fn id(&self) -> String;
 
@@ -257,7 +257,7 @@ impl ExitCode {
 }
 
 /// Represents child process.
-pub trait ChildProcess: Debug + 'static {
+pub trait ChildProcess: Debug + Send + Sync + 'static {
     type Error: StdError + Send + Sync + 'static;
     /// Represents pipe from current process to isolated
     type PipeIn: Write + Send + Sync + 'static;
