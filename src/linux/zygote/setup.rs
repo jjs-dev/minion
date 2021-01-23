@@ -223,7 +223,7 @@ pub(in crate::linux) fn setup(
             pids_max: jail_params.max_alive_process_count,
             memory_max: jail_params.memory_limit,
         },
-    );
+    )?;
     setup_time_watch(&jail_params, cgroup_driver)?;
     setup_chroot(&jail_params)?;
     sock.wake(WM_CLASS_SETUP_FINISHED)?;
@@ -250,7 +250,11 @@ fn cpu_time_observer(
 
         let elapsed = time::Instant::now().duration_since(start);
         let elapsed = elapsed.as_nanos();
-        let current_usage = driver.get_cpu_usage(jail_id);
+        let current_usage = driver.get_cpu_usage(jail_id).unwrap_or_else(|err| {
+            eprintln!("sandbox {}: failed to get time usage: {:?}", jail_id, err);
+            eprintln!("WARNING: assuming time limit exceeded");
+            u64::max_value()
+        });
         let was_cpu_tle = current_usage > cpu_time_limit;
         let was_real_tle = elapsed as u64 > real_time_limit;
         let ok = !was_cpu_tle && !was_real_tle;

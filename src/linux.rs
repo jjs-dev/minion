@@ -207,7 +207,7 @@ fn spawn(mut options: ChildProcessOptions<LinuxSandbox>) -> Result<LinuxChildPro
 
 /// Allows some customization
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Settings {
     /// All created cgroups will be children of specified group
     /// Default value is "/minion"

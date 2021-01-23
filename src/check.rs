@@ -41,13 +41,13 @@ impl std::fmt::Display for CheckResult {
         if !self.errors.is_empty() {
             "Errors:\n".fmt(f)?;
             for err in &self.errors {
-                format_args!("\t{}", err).fmt(f)?;
+                format_args!("\t{}\n", err).fmt(f)?;
             }
         }
         if !self.warnings.is_empty() {
             "Warnings:\n".fmt(f)?;
             for warn in &self.warnings {
-                format_args!("\t{}", warn).fmt(f)?;
+                format_args!("\t{}\n", warn).fmt(f)?;
             }
         }
         Ok(())

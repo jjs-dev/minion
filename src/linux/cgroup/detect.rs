@@ -1,8 +1,9 @@
 //! This module is responsible for CGroup version detection
 
-use std::path::{Path, PathBuf};
+use crate::linux::cgroup::{CgroupError, Driver, ResourceLimits};
+use rand::Rng;
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub(in crate::linux) enum CgroupVersion {
     /// Legacy
     V1,
@@ -10,28 +11,26 @@ pub(in crate::linux) enum CgroupVersion {
     V2,
 }
 
-impl CgroupVersion {
-    fn from_path(path: &Path) -> Option<(CgroupVersion, PathBuf)> {
-        let stat = nix::sys::statfs::statfs(path).ok()?;
-        let ty = stat.filesystem_type();
-        // man 2 statfs
-        match ty.0 {
-            0x0027_e0eb => return Some((CgroupVersion::V1, path.to_path_buf())),
-            0x6367_7270 => return Some((CgroupVersion::V2, path.to_path_buf())),
-            _ => (),
-        };
-        let vers = if path.join("cgroup.subtree_control").exists() {
-            CgroupVersion::V2
-        } else {
-            // TODO: better checks.
-            CgroupVersion::V1
-        };
-        tracing::info!(mount_point = %path.display(), version = ?vers, "detected cgroups");
-        Some((vers, path.to_path_buf()))
-    }
-    pub(in crate::linux) fn detect(
-        path: &Path,
-    ) -> Result<(CgroupVersion, PathBuf), crate::linux::Error> {
-        Self::from_path(path).ok_or(crate::linux::Error::Cgroups)
+impl Driver {
+    /// Checks that this Driver instance works correctly.
+    /// This is used for cgroup version auto-detection and system checking.
+    pub(in crate::linux) fn smoke_check(&self) -> Result<(), CgroupError> {
+        let mut group_id = "minion-cgroup-access-check-".to_string();
+        let mut rng = rand::thread_rng();
+        for _ in 0..5 {
+            group_id.push(rng.sample(rand::distributions::Alphanumeric) as char);
+        }
+        let cgroup = self.create_group(
+            &group_id,
+            &ResourceLimits {
+                memory_max: 1 << 30,
+                pids_max: 1024,
+            },
+        )?;
+
+        cgroup
+            .check_access()
+            .map_err(|cause| CgroupError::Join { cause })?;
+        Ok(())
     }
 }
