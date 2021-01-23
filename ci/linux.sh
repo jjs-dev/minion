@@ -9,7 +9,7 @@ echo "::group::Preparing"
 
 if [[ $CI_CGROUPS == "cgroup-v2" ]] && [ -z "${CI_VM+set}" ]; then
   echo "::group::Preparing virtual machine"
-  wget https://releases.hashicorp.com/vagrant/2.2.14/vagrant_2.2.14_x86_64.deb -O vagrant.deb
+  wget https://releases.hashicorp.com/vagrant/2.2.14/vagrant_2.2.14_x86_64.deb -q -O vagrant.deb
   sudo dpkg -i vagrant.deb
   vagrant --version
 cat > Vagrantfile <<EOF
@@ -22,7 +22,6 @@ Vagrant.configure("2") do |config|
   end
 end
 EOF
-  top -l 1
   cat Vagrantfile
   sudo vagrant up
   echo "::group::Installing packages"
