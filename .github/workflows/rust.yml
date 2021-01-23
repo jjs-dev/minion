@@ -38,15 +38,12 @@ jobs:
   tests-linux:
     strategy:
       matrix:
-        os: 
-          - 'ubuntu-20.04'
-          - 'macos-latest'
         rust-target:
           - 'x86_64-unknown-linux-musl'
         cgroups:
           - 'cgroup-v1'
           - 'cgroup-v2'
-    runs-on: ${{ matrix.os }}
+    runs-on: 'ubuntu-20.04'
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1.0.6
@@ -59,7 +56,6 @@ jobs:
         env:
           CI_TARGET: ${{ matrix.rust-target }}
           CI_CGROUPS: ${{ matrix.cgroups }}
-          CI_OS: ${{ matrix.os }}
       - name: Collect logs
         if: always()
         run: |

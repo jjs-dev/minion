@@ -2,22 +2,8 @@ set -euo pipefail
 echo "::group::Info"
 echo "Target: $CI_TARGET"
 echo "Cgroup version: $CI_CGROUPS"
-echo "Operating system: $CI_OS"
 
 echo "this is hack, ignore this file" >> ./stracez-dummy 
-
-if [[ $CI_OS == "ubuntu-20.04" ]]; then
-  if [[ $CI_CGROUPS == "cgroup-v2" ]]; then
-    echo "Skipping: cgroup v2 runs in macos"
-    exit 0
-  fi
-fi 
-if [[ $CI_OS == "macos-latest" ]]; then
-  if [[ $CI_CGROUPS == "cgroup-v1" ]]; then
-    echo "Skipping: cgroup v1 does not need virtualization"
-    exit 0
-  fi
-fi
 
 echo "::group::Preparing"
 
@@ -30,6 +16,7 @@ Vagrant.configure("2") do |config|
 
   config.vm.provider "virtualbox" do |vb|
     vb.memory = "900"
+    vb.customize ["modifyvm", :id, "--hwvirtex", "off"]
   end
 end
 EOF
@@ -41,7 +28,7 @@ EOF
   echo "::group::Installing rust"
   sudo vagrant ssh --command "curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable"
   echo "::group::Entering VM"
-  sudo vagrant ssh --command "bash -c 'cd /vagrant && CI_OS=$CI_OS CI_CGROUPS=$CI_CGROUPS CI_TARGET=$CI_TARGET CI_VM=1 bash ci/linux.sh'" 
+  sudo vagrant ssh --command "bash -c 'cd /vagrant && CI_CGROUPS=$CI_CGROUPS CI_TARGET=$CI_TARGET CI_VM=1 bash ci/linux.sh'" 
   echo "Host: pulling logs from VM"
   sudo vagrant ssh --command "cat /vagrant/logs.zip | base64" | base64 --decode > logs.zip
   rm stracez-dummy
