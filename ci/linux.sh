@@ -10,7 +10,7 @@ echo "::group::Preparing"
 if [[ $CI_CGROUPS == "cgroup-v2" ]] && [ -z "${CI_VM+set}" ]; then
   echo "::group::Preparing virtual machine"
   sudo apt-get update
-  sudo apt-get install qemu-system-x86_64
+  sudo apt-get install qemu-system
   #sudo apt-get install -y libopus0 libqt5core5a libqt5gui5 libqt5opengl5 libqt5printsupport5 \
   #    libqt5widgets5 libqt5x11extras5 libsdl1.2debian python
   #wget https://releases.hashicorp.com/vagrant/2.2.14/vagrant_2.2.14_x86_64.deb -q -O vagrant.deb
