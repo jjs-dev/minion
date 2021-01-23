@@ -1,0 +1,10 @@
+status = [
+'build-image',
+'fmt',
+'clippy',
+'tests-linux (ubuntu-20.04, x86_64-unknown-linux-musl, cgroup-v1)',
+'tests-linux (macos-latest, x86_64-unknown-linux-musl, cgroup-v2)',
+'nightly-checks',
+]
+delete-merged-branches = true
+timeout-sec = 900
