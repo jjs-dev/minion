@@ -1,3 +1,5 @@
+use crate::linux::cgroup::{CgroupDetectionError, CgroupError};
+
 #[derive(Eq, PartialEq)]
 pub enum ErrorKind {
     /// This error typically means that isolated process tried to break its sandbox
@@ -16,14 +18,22 @@ pub enum Error {
     #[error("io error")]
     Io {
         #[from]
-        source: std::io::Error,
+        cause: std::io::Error,
     },
     #[error("sandbox interaction failed")]
     Sandbox,
     #[error("unknown error")]
     Unknown,
     #[error("Cgroup detection failure")]
-    Cgroups,
+    CgroupDetection {
+        #[from]
+        cause: CgroupDetectionError,
+    },
+    #[error("Cgroup manipulation failed")]
+    Cgroup {
+        #[from]
+        cause: CgroupError,
+    },
 }
 
 impl Error {
@@ -34,7 +44,8 @@ impl Error {
             Error::Io { .. } => ErrorKind::System,
             Error::Sandbox => ErrorKind::Sandbox,
             Error::Unknown => ErrorKind::System,
-            Error::Cgroups => ErrorKind::System,
+            Error::Cgroup { .. } => ErrorKind::System,
+            Error::CgroupDetection { .. } => ErrorKind::System,
         }
     }
 

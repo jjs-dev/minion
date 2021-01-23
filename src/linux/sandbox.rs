@@ -107,13 +107,13 @@ impl Sandbox for LinuxSandbox {
 
     fn kill(&self) -> Result<(), Error> {
         jail_common::kill_sandbox(self.0.zygote_pid, &self.0.id, &self.0.cgroup_driver)
-            .map_err(|err| Error::Io { source: err })?;
+            .map_err(|err| Error::Io { cause: err })?;
         Ok(())
     }
 
     fn resource_usage(&self) -> Result<crate::ResourceUsageData, Error> {
-        let cpu_usage = self.0.cgroup_driver.get_cpu_usage(&self.0.id);
-        let memory_usage = self.0.cgroup_driver.get_memory_usage(&self.0.id);
+        let cpu_usage = self.0.cgroup_driver.get_cpu_usage(&self.0.id)?;
+        let memory_usage = self.0.cgroup_driver.get_memory_usage(&self.0.id)?;
         Ok(crate::ResourceUsageData {
             memory: memory_usage,
             time: Some(cpu_usage),
