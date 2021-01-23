@@ -305,12 +305,10 @@ pub unsafe extern "C" fn minion_cp_spawn(
             p = p.offset(1);
         }
     }
-    let stdio = unsafe {
-        minion::StdioSpecification {
-            stdin: minion::InputSpecification::handle(options.stdio.stdin),
-            stdout: minion::OutputSpecification::handle(options.stdio.stdout),
-            stderr: minion::OutputSpecification::handle(options.stdio.stderr),
-        }
+    let stdio = minion::StdioSpecification {
+        stdin: minion::InputSpecification::handle(options.stdio.stdin),
+        stdout: minion::OutputSpecification::handle(options.stdio.stdout),
+        stderr: minion::OutputSpecification::handle(options.stdio.stderr),
     };
     let options = unsafe {
         minion::ChildProcessOptions {
