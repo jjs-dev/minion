@@ -10,6 +10,8 @@ echo "::group::Preparing"
 if [[ $CI_CGROUPS == "cgroup-v2" ]] && [ -z "${CI_VM+set}" ]; then
   echo "::group::Preparing virtual machine"
   wget https://releases.hashicorp.com/vagrant/2.2.14/vagrant_2.2.14_x86_64.deb -q -O vagrant.deb
+  wget https://download.virtualbox.org/virtualbox/5.2.44/virtualbox-5.2_5.2.44-139111~Ubuntu~bionic_amd64.deb -q -O vb.deb
+  sudo dpkg -i vb.deb
   sudo dpkg -i vagrant.deb
   vagrant --version
 cat > Vagrantfile <<EOF
