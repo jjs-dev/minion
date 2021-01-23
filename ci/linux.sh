@@ -10,23 +10,27 @@ echo "::group::Preparing"
 if [[ $CI_CGROUPS == "cgroup-v2" ]] && [ -z "${CI_VM+set}" ]; then
   echo "::group::Preparing virtual machine"
   sudo apt-get update
-  sudo apt-get install -y libopus0 libqt5core5a libqt5gui5 libqt5opengl5 libqt5printsupport5 \
-      libqt5widgets5 libqt5x11extras5 libsdl1.2debian python
-  wget https://releases.hashicorp.com/vagrant/2.2.14/vagrant_2.2.14_x86_64.deb -q -O vagrant.deb
-  wget https://download.virtualbox.org/virtualbox/5.2.44/virtualbox-5.2_5.2.44-139111~Ubuntu~bionic_amd64.deb -q -O vb.deb
-  wget http://security.ubuntu.com/ubuntu/pool/main/libv/libvpx/libvpx5_1.7.0-3ubuntu0.18.04.1_amd64.deb -q -O libvpx.deb
-  sudo dpkg -i libvpx.deb
-  sudo dpkg -i vb.deb
-  sudo dpkg -i vagrant.deb
-  vagrant --version
+  sudo apt-get install qemu-system-x86_64
+  #sudo apt-get install -y libopus0 libqt5core5a libqt5gui5 libqt5opengl5 libqt5printsupport5 \
+  #    libqt5widgets5 libqt5x11extras5 libsdl1.2debian python
+  #wget https://releases.hashicorp.com/vagrant/2.2.14/vagrant_2.2.14_x86_64.deb -q -O vagrant.deb
+  #wget https://download.virtualbox.org/virtualbox/5.2.44/virtualbox-5.2_5.2.44-139111~Ubuntu~bionic_amd64.deb -q -O vb.deb
+  #wget http://security.ubuntu.com/ubuntu/pool/main/libv/libvpx/libvpx5_1.7.0-3ubuntu0.18.04.1_amd64.deb -q -O libvpx.deb
+  #sudo dpkg -i libvpx.deb
+  #sudo dpkg -i vb.deb
+  #sudo dpkg -i vagrant.deb
+  #vagrant --version
 cat > Vagrantfile <<EOF
 Vagrant.configure("2") do |config|
   config.vm.box = "fedora/32-cloud-base"
 
-  config.vm.provider "virtualbox" do |vb|
+  config.vm.provider "qemu" do |vb|
     vb.memory = "900"
-    vb.customize ["modifyvm", :id, "--hwvirtex", "off"]
   end
+  #config.vm.provider "virtualbox" do |vb|
+  #  vb.memory = "900"
+  #  vb.customize ["modifyvm", :id, "--hwvirtex", "off"]
+  #end
 end
 EOF
   cat Vagrantfile
