@@ -155,9 +155,9 @@ async fn main() {
             .collect(),
         sandbox: sandbox.clone(),
         stdio: minion::StdioSpecification {
-            stdin: unsafe { minion::InputSpecification::handle(stdin_fd) },
-            stdout: unsafe { minion::OutputSpecification::handle(stdout_fd) },
-            stderr: unsafe { minion::OutputSpecification::handle(stderr_fd) },
+            stdin: minion::InputSpecification::handle(stdin_fd),
+            stdout: minion::OutputSpecification::handle(stdout_fd),
+            stderr: minion::OutputSpecification::handle(stderr_fd),
         },
         pwd: options.pwd.into(),
     };
