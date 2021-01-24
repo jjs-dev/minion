@@ -50,7 +50,9 @@ impl crate::TestCase for TTlFork {
         (TODO: verify this is not wall-clock time limit)"
     }
     fn test(&self) -> ! {
-        nix::unistd::fork().unwrap();
+        unsafe {
+            nix::unistd::fork().unwrap();
+        }
         exceed_time_limit()
     }
     fn check(&self, cp: crate::CompletedChild, _: &dyn Sandbox) {
