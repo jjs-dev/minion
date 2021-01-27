@@ -12,7 +12,7 @@ use crate::{
 };
 use nix::sys::signal;
 use std::{
-    ffi::CString,
+    ffi::{CStr, CString},
     fs, io,
     io::Write,
     os::unix::{ffi::OsStrExt, io::RawFd},
@@ -64,7 +64,7 @@ fn expose_dir(jail_root: &Path, system_path: &Path, alias_path: &Path, kind: Sha
         let mnt_res = libc::mount(
             bind_src.as_ptr(),
             bind_target.as_ptr(),
-            "bind\0".as_ptr(),
+            CStr::from_bytes_with_nul(b"bind\0").unwrap().as_ptr(),
             libc::MS_BIND,
             ptr::null(),
         );
