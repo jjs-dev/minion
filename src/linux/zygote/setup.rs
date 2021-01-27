@@ -64,7 +64,7 @@ fn expose_dir(jail_root: &Path, system_path: &Path, alias_path: &Path, kind: Sha
         let mnt_res = libc::mount(
             bind_src.as_ptr(),
             bind_target.as_ptr(),
-            ptr::null(),
+            "bind\0".as_ptr(),
             libc::MS_BIND,
             ptr::null(),
         );
