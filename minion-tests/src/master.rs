@@ -84,7 +84,8 @@ fn execute_single_test(
     let mut cmd = if exec_opts.trace {
         let mut cmd = std::process::Command::new("strace");
         cmd.arg("-f"); // follow forks
-        cmd.arg("-o").arg(format!("strace-log-{}.txt", case.name()));
+        cmd.arg("-o")
+            .arg(format!("strace-log-{}-{}.txt", case.name(), config_idx));
         cmd.arg(self_exe);
         cmd
     } else {
