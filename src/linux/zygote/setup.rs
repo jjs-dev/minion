@@ -119,6 +119,7 @@ pub(crate) fn expose_dirs(expose: &[SharedDir], jail_root: &Path, use_mount: boo
             fs::remove_dir(&bind_target).unwrap();
             fs::write(&bind_target, &"").unwrap();
         }
+        configure_dir(&bind_target).expect("failed to change access rights on the mount point");
         if use_mount {
             expose_dir_via_mount(&bind_target, &x.src, x.kind)
         } else {
@@ -249,10 +250,10 @@ pub(in crate::linux) fn setup(
 ) -> Result<SetupData, Error> {
     setup_panic_hook();
     setup_sighandler();
+    setup_expositions(&jail_params);
     // must be done before `configure_dir`.
     setup_uid_mapping(sock)?;
     configure_dir(&jail_params.isolation_root)?;
-    setup_expositions(&jail_params);
     setup_procfs(&jail_params)?;
     let cgroup_join_handle = cgroup_driver.create_group(
         &jail_params.jail_id,
