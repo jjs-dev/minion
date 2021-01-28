@@ -2,7 +2,7 @@ name: Rust
 
 on:
   push:
-    branches: 
+    branches:
       - master
       - staging
       - trying
@@ -20,7 +20,7 @@ jobs:
           toolchain: stable
           components: rustfmt
       - name: Check formatting
-        run: | 
+        run: |
           rm -rf .cargo
           cargo fmt --all -- --check
   clippy:
@@ -35,26 +35,51 @@ jobs:
       - name: Run clippy
         run: |
           cargo clippy --workspace -- -Dclippy::all -Dwarnings
-  tests-linux:
-    strategy:
-      matrix:
-        os: 
-          - 'ubuntu-20.04'
-          - 'macos-latest'
-        rust-target:
-          - 'x86_64-unknown-linux-musl'
-        cgroups:
-          - 'cgroup-v1'
-          - 'cgroup-v2'
-    runs-on: ${{ matrix.os }}
+  tests-linux-build:
+    runs-on: 'ubuntu-20.04'
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1.0.6
-        with: 
-          toolchain: stable
+        with:
+          # nightly is used for cargo --out-dir option.
+          toolchain: nightly
           override: true
+      - name: Install targets
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+      - name: Build tests (musl)
+        run: |
+          mkdir -p ./tests/x86_64-unknown-linux-musl
+          cargo build -p minion-tests -Zunstable-options --out-dir=./tests/x86_64-unknown-linux-musl --target=x86_64-unknown-linux-musl
+        timeout-minutes: 5
+      - uses: actions/upload-artifact@v2
+        with:
+          path: ./tests
+          name: tests-linux
+          retention-days: 2
+  tests-linux-run:
+    strategy:
+      matrix:
+        os:
+          - "ubuntu-20.04"
+          - "macos-latest"
+        rust-target:
+          - "x86_64-unknown-linux-musl"
+        cgroups:
+          - "cgroup-v1"
+          - "cgroup-v2"
+    runs-on: ${{ matrix.os }}
+    needs:
+      - tests-linux-build
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/download-artifact@v1
+        with:
+          path: ./tests
+          name: tests-linux
       - name: Test
-        run: bash ci/linux.sh
+        run: |
+          bash ci/linux.sh
         timeout-minutes: 10
         env:
           CI_TARGET: ${{ matrix.rust-target }}
@@ -85,4 +110,3 @@ jobs:
           cargo check --workspace
         env:
           RUSTFLAGS: -Wunused-crate-dependencies --cfg minion_nightly
-      
