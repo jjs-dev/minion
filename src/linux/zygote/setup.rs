@@ -119,7 +119,7 @@ pub(crate) fn expose_dirs(expose: &[SharedDir], jail_root: &Path, use_mount: boo
             fs::remove_dir(&bind_target).unwrap();
             fs::write(&bind_target, &"").unwrap();
         }
-        configure_dir(&bind_target).expect("failed to change access rights on the mount point");
+        // configure_dir(&bind_target).expect("failed to change access rights on the mount point");
         if use_mount {
             expose_dir_via_mount(&bind_target, &x.src, x.kind)
         } else {
