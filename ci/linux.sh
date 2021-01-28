@@ -29,7 +29,7 @@ Vagrant.configure("2") do |config|
   config.vm.box = "fedora/32-cloud-base"
 
   config.vm.provider "virtualbox" do |vb|
-    vb.memory = "900"
+    vb.memory = "700"
   end
 end
 EOF
@@ -37,9 +37,7 @@ EOF
   cat Vagrantfile
   sudo vagrant up
   echo "::group::Installing packages"
-  sudo vagrant ssh --command "sudo dnf install -y gcc gcc-c++ strace zip"
-  echo "::group::Installing rust"
-  sudo vagrant ssh --command "curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable"
+  sudo vagrant ssh --command "sudo dnf install -y strace zip"
   echo "::group::Entering VM"
   sudo vagrant ssh --command "bash -c 'cd /vagrant && CI_OS=$CI_OS CI_CGROUPS=$CI_CGROUPS CI_TARGET=$CI_TARGET CI_VM=1 bash ci/linux.sh'" 
   echo "Host: pulling logs from VM"
@@ -52,8 +50,6 @@ EOF
   exit 0
 fi
 
-rustup target add $CI_TARGET  
-
 if [[ $CI_CGROUPS == "cgroup-v2" ]]; then
   echo "::group::Some cgroup hacks"
   sudo mkdir /sys/fs/cgroup/minion
@@ -61,15 +57,9 @@ if [[ $CI_CGROUPS == "cgroup-v2" ]]; then
   echo "+cpu +memory +pids" | sudo tee /sys/fs/cgroup/minion/cgroup.subtree_control
 fi
 
-echo "::group::Compiling tests"
-echo '[build]
-rustflags=["--cfg", "minion_ci"]' > .cargo/config
-
-export RUSTC_BOOTSTRAP=1
-cargo build -p minion-tests -Zunstable-options --out-dir=./out --target=$CI_TARGET
-
 echo "::group::Running tests"
-sudo --preserve-env ./out/minion-tests --trace
+chmod +x ./tests/$CI_TARGET/minion-tests
+sudo --preserve-env ./tests/$CI_TARGET/minion-tests --trace
 echo "::group::Finalize"
 echo "Current directory after running tests"
 ls .
