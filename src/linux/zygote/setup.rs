@@ -60,7 +60,7 @@ fn expose_dir(jail_root: &Path, system_path: &Path, alias_path: &Path, kind: Sha
     }
     let bind_target = CString::new(bind_target.as_os_str().as_bytes()).unwrap();
     let bind_src = CString::new(system_path.as_os_str().as_bytes()).unwrap();
-    let fstype = CStr::from_bytes_with_nul(b"bind\0").unwrap();
+    let fstype = CStr::from_bytes_with_nul(b"none\0").unwrap();
     unsafe {
         libc::printf(fstype.as_ptr());
         libc::printf(b"bind\0".as_ptr().cast());
