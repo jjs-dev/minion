@@ -13,8 +13,12 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
         .find(|&tc| tc.name() == test_case_name)
         .unwrap();
 
+    let config_idx = std::env::var("CONFIG_INDEX").unwrap().parse().unwrap();
+    let config = crate::configurations().into_iter().nth(config_idx).unwrap();
+
     let tempdir = tempfile::TempDir::new().expect("cannot create temporary dir");
-    let backend = minion::erased::setup().expect("backend creation failed");
+    let backend = minion::LinuxBackend::new(config).expect("backend creation failed");
+    let backend: Box<dyn minion::erased::Backend> = Box::new(backend);
     let opts = minion::SandboxOptions {
         cpu_time_limit: test_case.time_limit(),
         real_time_limit: test_case.real_time_limit(),
