@@ -15,6 +15,7 @@ pub(crate) struct JailOptions {
     pub(crate) real_time_limit: Duration,
     pub(crate) isolation_root: PathBuf,
     pub(crate) exposed_paths: Vec<SharedDir>,
+    pub(crate) use_mount_for_binds: bool,
     pub(crate) jail_id: String,
     pub(crate) watchdog_chan: RawFd,
     pub(crate) allow_mount_ns_failure: bool,

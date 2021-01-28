@@ -172,6 +172,7 @@ impl LinuxSandbox {
             real_time_limit: options.real_time_limit,
             isolation_root: options.isolation_root.clone(),
             exposed_paths: options.exposed_paths.clone(),
+            use_mount_for_binds: settings.use_mount_program,
             jail_id: jail_id.clone(),
             watchdog_chan: write_end,
             allow_mount_ns_failure: settings.allow_unsupported_mount_namespace,

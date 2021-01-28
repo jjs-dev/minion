@@ -50,7 +50,7 @@ pub use command::Command;
 /// Anyway, SUID-bit will be disabled.
 ///
 /// Warning: this type is __unstable__ (i.e. not covered by SemVer) and __non-portable__
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub enum SharedDirKind {
     Readonly,
     Full,

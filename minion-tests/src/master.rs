@@ -1,4 +1,5 @@
 //! Master source code
+
 use crate::TestCase;
 
 #[derive(Copy, Clone)]
@@ -58,6 +59,7 @@ struct ExecuteOptions {
 }
 
 fn execute_tests(test_cases: &[&dyn TestCase], exec_opts: ExecuteOptions) -> Outcome {
+    let configs_count = crate::configurations().len();
     println!("will run:");
     for &case in test_cases {
         println!("  - {}", case.name());
@@ -65,18 +67,25 @@ fn execute_tests(test_cases: &[&dyn TestCase], exec_opts: ExecuteOptions) -> Out
     println!("({} tests)", test_cases.len());
     let mut outcome = Outcome::Success;
     for &case in test_cases {
-        outcome = outcome.and(execute_single_test(case, exec_opts));
+        for idx in 0..configs_count {
+            outcome = outcome.and(execute_single_test(case, exec_opts, idx));
+        }
     }
     outcome
 }
 
-fn execute_single_test(case: &dyn TestCase, exec_opts: ExecuteOptions) -> Outcome {
-    println!("------ {} ------", case.name());
+fn execute_single_test(
+    case: &dyn TestCase,
+    exec_opts: ExecuteOptions,
+    config_idx: usize,
+) -> Outcome {
+    println!("------ {} (config #{}) ------", case.name(), config_idx);
     let self_exe = std::env::current_exe().unwrap();
     let mut cmd = if exec_opts.trace {
         let mut cmd = std::process::Command::new("strace");
         cmd.arg("-f"); // follow forks
-        cmd.arg("-o").arg(format!("strace-log-{}.txt", case.name()));
+        cmd.arg("-o")
+            .arg(format!("strace-log-{}-{}.txt", case.name(), config_idx));
         cmd.arg(self_exe);
         cmd
     } else {
@@ -91,6 +100,7 @@ fn execute_single_test(case: &dyn TestCase, exec_opts: ExecuteOptions) -> Outcom
     }
     cmd.env(crate::WORKER_ENV_NAME, "1");
     cmd.env("TEST", case.name());
+    cmd.env("CONFIG_INDEX", config_idx.to_string());
     let status = cmd.status().unwrap();
     if status.success() {
         Outcome::Success

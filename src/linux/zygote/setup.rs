@@ -15,8 +15,9 @@ use std::{
     ffi::CString,
     fs, io,
     io::Write,
-    os::unix::{ffi::OsStrExt, io::RawFd},
+    os::unix::{ffi::OsStrExt, io::RawFd, prelude::ExitStatusExt},
     path::Path,
+    process::Command,
     ptr, time,
 };
 use tiny_nix_ipc::Socket;
@@ -49,15 +50,7 @@ fn configure_dir(dir_path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn expose_dir(jail_root: &Path, system_path: &Path, alias_path: &Path, kind: SharedDirKind) {
-    let bind_target = jail_root.join(alias_path);
-    fs::create_dir_all(&bind_target).unwrap();
-    let stat = fs::metadata(&system_path)
-        .unwrap_or_else(|err| panic!("failed to stat {}: {}", system_path.display(), err));
-    if stat.is_file() {
-        fs::remove_dir(&bind_target).unwrap();
-        fs::write(&bind_target, &"").unwrap();
-    }
+fn expose_dir_via_syscall(bind_target: &Path, system_path: &Path, kind: SharedDirKind) {
     let bind_target = CString::new(bind_target.as_os_str().as_bytes()).unwrap();
     let bind_src = CString::new(system_path.as_os_str().as_bytes()).unwrap();
     unsafe {
@@ -87,10 +80,51 @@ fn expose_dir(jail_root: &Path, system_path: &Path, alias_path: &Path, kind: Sha
     }
 }
 
-pub(crate) fn expose_dirs(expose: &[SharedDir], jail_root: &Path) {
+fn expose_dir_via_mount(bind_target: &Path, system_path: &Path, kind: SharedDirKind) {
+    let mut cmd = Command::new("mount");
+    match kind {
+        SharedDirKind::Full => {
+            cmd.arg("--bind");
+        }
+        SharedDirKind::Readonly => {
+            cmd.arg("-o").arg("bind,ro");
+        }
+    }
+    cmd.arg(system_path);
+    cmd.arg(bind_target);
+    match cmd.status() {
+        Ok(st) => {
+            if !st.success() {
+                panic!(
+                    "mount program failed: exit code {:?}, signal {:?}",
+                    st.code(),
+                    st.signal()
+                );
+            }
+        }
+        Err(err) => {
+            panic!("failed to spawn mount: {:#}", err);
+        }
+    }
+}
+
+pub(crate) fn expose_dirs(expose: &[SharedDir], jail_root: &Path, use_mount: bool) {
     // mount --bind
     for x in expose {
-        expose_dir(jail_root, &x.src, &x.dest, x.kind.clone())
+        let bind_target = jail_root.join(&x.dest);
+        fs::create_dir_all(&bind_target).unwrap();
+        let stat = fs::metadata(&x.src)
+            .unwrap_or_else(|err| panic!("failed to stat {}: {}", x.src.display(), err));
+        if stat.is_file() {
+            fs::remove_dir(&bind_target).unwrap();
+            fs::write(&bind_target, &"").unwrap();
+        }
+        // configure_dir(&bind_target).expect("failed to change access rights on the mount point");
+        if use_mount {
+            expose_dir_via_mount(&bind_target, &x.src, x.kind)
+        } else {
+            expose_dir_via_syscall(&bind_target, &x.src, x.kind)
+        }
     }
 }
 
@@ -183,7 +217,11 @@ fn setup_time_watch(
 }
 
 fn setup_expositions(options: &JailOptions) {
-    expose_dirs(&options.exposed_paths, &options.isolation_root);
+    expose_dirs(
+        &options.exposed_paths,
+        &options.isolation_root,
+        options.use_mount_for_binds,
+    );
 }
 
 fn setup_panic_hook() {
@@ -212,10 +250,10 @@ pub(in crate::linux) fn setup(
 ) -> Result<SetupData, Error> {
     setup_panic_hook();
     setup_sighandler();
+    setup_expositions(&jail_params);
     // must be done before `configure_dir`.
     setup_uid_mapping(sock)?;
     configure_dir(&jail_params.isolation_root)?;
-    setup_expositions(&jail_params);
     setup_procfs(&jail_params)?;
     let cgroup_join_handle = cgroup_driver.create_group(
         &jail_params.jail_id,

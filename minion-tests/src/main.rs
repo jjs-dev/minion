@@ -11,6 +11,8 @@
 //! Worker: sets up sandbox, executes `minion-tests` in Test mode.
 //! Test: just executes test selected by name
 #![feature(asm, test)]
+
+use minion::linux::Settings;
 mod master;
 mod tests;
 mod worker;
@@ -97,4 +99,11 @@ enum Role {
     Master,
     Worker,
     Test,
+}
+
+fn configurations() -> Vec<Settings> {
+    let s = Settings::new();
+    let mut s_ext_mount = s.clone();
+    s_ext_mount.use_mount_program = true;
+    vec![s, s_ext_mount]
 }

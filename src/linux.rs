@@ -222,6 +222,10 @@ pub struct Settings {
     /// If enabled, minion will ignore clone(MOUNT_NEWNS) error.
     /// This flag has to be enabled for gVisor support.
     pub allow_unsupported_mount_namespace: bool,
+
+    /// If enabled, minion will use `mount` CLI utility
+    /// for creating bind-mounts.
+    pub use_mount_program: bool,
 }
 
 impl Default for Settings {
@@ -232,6 +236,7 @@ impl Default for Settings {
             cgroupfs: std::env::var_os("MINION_CGROUPFS")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("/sys/fs/cgroup")),
+            use_mount_program: false,
         }
     }
 }
