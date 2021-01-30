@@ -98,10 +98,12 @@ jobs:
         if: always()
         with:
           path: /tmp/slirp_in.log
+          name: slirp_in.log
       - uses: actions/upload-artifact@v1
         if: always()
         with:
           path: /tmp/slirp_out.log
+          name: slirp_out.log
 
   nightly-checks:
     runs-on: ubuntu-20.04
