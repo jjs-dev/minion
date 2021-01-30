@@ -10,6 +10,12 @@ tar -xJf linux-5.4.93.tar.xz
 cd linux-5.4.93
 export ARCH=um
 make defconfig
+cat >> .config << EOF
+CONFIG_CGROUP_PIDS=y
+CONFIG_MEMCG=y
+CONFIG_MEMCG_SWAP=y
+CONFIG_MEMCG_SWAP_ENABLED=y
+EOF
 make -j3
 )
 linux-5.4.93/linux mem=4096M ubda=img rootfstype=hostfs init="$PWD"/uml-setup.sh
