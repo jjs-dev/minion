@@ -47,6 +47,10 @@ jobs:
       - name: Install targets
         run: |
           rustup target add x86_64-unknown-linux-musl
+      - uses: actions/cache@v2
+        with:
+          path: ./target
+          key: ${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
       - name: Build tests (musl)
         run: |
           mkdir -p ./tests/x86_64-unknown-linux-musl
