@@ -14,6 +14,8 @@ echo root:root | chpasswd
 ifconfig eth0 10.0.2.15 netmask 255.255.255.0
 route add default dev eth0
 echo nameserver 10.0.2.3 > /etc/resolv.conf
+ifconfig -a > /dev/console
+route > /dev/console
 exit 0
 ' > /dev/mnt/etc/rc.d/rc.local
 chmod +x /dev/mnt/etc/rc.d/rc.local
