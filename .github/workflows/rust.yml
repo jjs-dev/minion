@@ -79,7 +79,7 @@ jobs:
       - name: Test
         run: |
           bash ci/linux.sh
-        timeout-minutes: 10
+        timeout-minutes: 20
         env:
           CI_TARGET: ${{ matrix.rust-target }}
           CI_CGROUPS: ${{ matrix.cgroups }}
