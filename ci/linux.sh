@@ -10,7 +10,7 @@ echo "::group::Preparing"
 
 if [[ $CI_CGROUPS == "cgroup-v2" ]] && [ -z "${CI_VM+set}" ]; then
   echo "::group::Preparing virtual machine"
-  sudo apt install sshpass slirp
+  sudo apt install sshpass slirp strace
   ( cd uml-ci; ./main.sh; )
   sudo sshpass -p user ssh -p 2224 user@127.0.0.1 "cat /vagrant/logs.zip | base64" | base64 --decode > logs.zip
   sudo sshpass -p user ssh -p 2224 user@127.0.0.1 sudo poweroff
