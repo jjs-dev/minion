@@ -12,6 +12,7 @@ export ARCH=um
 make defconfig
 make -j3
 )
+linux-5.4.93/linux mem=4096M ubda=img rootfstype=hostfs init=/home/runner/work/minion/minion/
 linux-5.4.93/linux mem=4096M ubda=img rootfstype=hostfs init="$PWD"/uml-setup.sh
 linux-5.4.93/linux mem=4096M ubda=img root=/dev/ubda1 rootfstype=ext4 hostfs=.. eth0=slirp,,./uml-slirp.sh &
 ./uml-ssh.sh
