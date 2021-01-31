@@ -13,8 +13,8 @@ if [[ $CI_CGROUPS == "cgroup-v2" ]] && [ -z "${CI_VM+set}" ]; then
   sudo apt install sshpass strace
   wget http://ftp.debian.org/debian/pool/main/s/slirp/slirp_1.0.17-8_amd64.deb -O slirp.deb && sudo dpkg -i slirp.deb
   ( cd uml-ci; ./main.sh; )
-  sudo sshpass -p user ssh -p 2224 user@127.0.0.1 "cat /vagrant/logs.zip | base64" | base64 --decode > logs.zip
-  sudo sshpass -p user ssh -p 2224 user@127.0.0.1 sudo poweroff
+  #sudo sshpass -p user ssh -p 2224 user@127.0.0.1 "cat /vagrant/logs.zip | base64" | base64 --decode > logs.zip # WTF??
+  sudo sshpass -p user ssh -p 2224 user@127.0.0.1 sudo poweroff || true
   rm stracez-dummy
   unzip logs.zip
   sleep 10
