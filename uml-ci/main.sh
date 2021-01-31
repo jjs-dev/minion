@@ -10,11 +10,14 @@ tar -xJf linux-5.4.93.tar.xz
 cd linux-5.4.93
 export ARCH=um
 make defconfig
+bash
 cat >> .config << EOF
 CONFIG_CGROUP_PIDS=y
 CONFIG_MEMCG=y
 CONFIG_MEMCG_SWAP=y
 CONFIG_MEMCG_SWAP_ENABLED=y
+CONFIG_USER_NS=y
+CONFIG_PID_NS=y
 EOF
 make -j3
 )
