@@ -18,9 +18,9 @@ fn parse_env_item(src: &str) -> Result<EnvItem, &'static str> {
 
 fn parse_path_exposition_item(src: &str) -> Result<minion::SharedItem, String> {
     let parts = src.splitn(3, ':').collect::<Vec<_>>();
-    if parts.len() != 3 {
+    if parts.len() != 3 && parts.len() != 4 {
         return Err(format!(
-            "--expose item must contain two colons (`:`), but no {} was provided",
+            "--expose item must look like `src:mode:dest` (3 parts) or `src:mode:dest:flags` (4 parts), but {} parts was provided",
             parts.len()
         ));
     }
@@ -41,11 +41,16 @@ fn parse_path_exposition_item(src: &str) -> Result<minion::SharedItem, String> {
             ));
         }
     };
+    let flags = parts
+        .get(3)
+        .map(|flags| flags.split(',').map(ToString::to_string).collect())
+        .unwrap_or_default();
     Ok(minion::SharedItem {
         id: None,
         src: parts[0].to_string().into(),
         dest: parts[2].to_string().into(),
         kind,
+        flags,
     })
 }
 

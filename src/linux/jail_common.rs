@@ -1,6 +1,6 @@
 use crate::{
     linux::{ipc::Socket, util::Pid},
-    SharedItem,
+    SharedItemKind,
 };
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
@@ -16,10 +16,23 @@ pub(crate) struct JailOptions {
     /// Possible value: time_limit * 3.
     pub(crate) real_time_limit: Duration,
     pub(crate) isolation_root: PathBuf,
-    pub(crate) shared_items: Vec<SharedItem>,
+    pub(crate) shared_items: Vec<LinuxSharedItem>,
     pub(crate) jail_id: String,
     pub(crate) watchdog_chan: RawFd,
     pub(crate) allow_mount_ns_failure: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub(crate) struct LinuxSharedItem {
+    pub(crate) src: PathBuf,
+    pub(crate) dest: PathBuf,
+    pub(crate) kind: SharedItemKind,
+    pub(crate) flags: SharedItemFlags,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub(crate) struct SharedItemFlags {
+    pub(crate) recursive: bool,
 }
 
 const ID_CHARS: &[u8] = b"qwertyuiopasdfghjklzxcvbnm1234567890";

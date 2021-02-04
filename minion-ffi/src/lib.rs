@@ -49,6 +49,21 @@ unsafe fn get_string(buf: *const c_char) -> OsString {
     s.to_os_string()
 }
 
+unsafe fn get_string_list(mut buf: *const *const c_char) -> Vec<String> {
+    if buf.is_null() {
+        return Vec::new();
+    }
+    let mut res = Vec::new();
+    while unsafe { !(*buf).is_null() } {
+        let s = unsafe { CStr::from_ptr(*buf) };
+        res.push(s.to_str().expect("non-utf8 string received").to_string());
+
+        buf = unsafe { buf.add(1) };
+    }
+
+    res
+}
+
 pub struct Backend(Box<dyn minion::erased::Backend>);
 
 /// # Safety
@@ -169,6 +184,7 @@ pub unsafe extern "C" fn minion_sandbox_create(
                 id: None,
                 src: get_string((*p).host_path).into(),
                 dest: get_string((*p).sandbox_path).into(),
+                flags: get_string_list((*p).flags),
                 kind: match (*p).kind {
                     SharedItemAccessKind::Full => minion::SharedItemKind::Full,
                     SharedItemAccessKind::Readonly => minion::SharedItemKind::Readonly,
@@ -261,6 +277,10 @@ pub struct SharedItem {
     pub kind: SharedItemAccessKind,
     pub host_path: *const c_char,
     pub sandbox_path: *const c_char,
+    /// Mount flags.
+    /// This nullable pointer should point to null-terminated
+    /// array of null-terminated utf-8 strings
+    pub flags: *const *const c_char,
 }
 
 // minion-ffi will never modify host_path or sandbox_path, so no races can occur
@@ -271,6 +291,7 @@ pub static SHARED_DIRECTORY_ACCESS_FIN: SharedItem = SharedItem {
     kind: SharedItemAccessKind::Full, //doesn't matter
     host_path: std::ptr::null(),
     sandbox_path: std::ptr::null(),
+    flags: std::ptr::null(),
 };
 
 pub struct ChildProcess(Box<dyn minion::erased::ChildProcess>);
