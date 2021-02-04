@@ -192,6 +192,7 @@ pub unsafe extern "C" fn minion_sandbox_create(
         ),
         isolation_root,
         shared_items,
+        extensions: None,
     };
     let d = backend.0.new_sandbox(opts);
     let d = d.unwrap();

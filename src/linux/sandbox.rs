@@ -3,7 +3,7 @@ use crate::{
         jail_common,
         pipe::setup_pipe,
         util::{IpcSocketExt, Pid},
-        zygote, Error,
+        zygote, Error, LinuxSandboxOptionsExtensions,
     },
     ExitCode, Sandbox, SandboxOptions,
 };
@@ -55,7 +55,7 @@ pub struct LinuxSandbox(Arc<LinuxSandboxInner>);
 #[repr(C)]
 struct LinuxSandboxInner {
     id: String,
-    options: SandboxOptions,
+    options: SandboxOptions<LinuxSandboxOptionsExtensions>,
     zygote_sock: Mutex<Socket>,
     zygote_pid: Pid,
     state: SandboxState,
@@ -66,7 +66,7 @@ struct LinuxSandboxInner {
 #[derive(Debug)]
 struct LinuxSandboxDebugHelper<'a> {
     id: &'a str,
-    options: &'a SandboxOptions,
+    options: &'a SandboxOptions<LinuxSandboxOptionsExtensions>,
     zygote_sock: RawFd,
     zygote_pid: Pid,
     state: SandboxState,
@@ -152,8 +152,8 @@ impl LinuxSandbox {
     }
 
     pub(in crate::linux) unsafe fn create(
-        options: SandboxOptions,
-        settings: &crate::linux::Settings,
+        options: SandboxOptions<LinuxSandboxOptionsExtensions>,
+        settings: &crate::linux::BackendSettings,
         cgroup_driver: Arc<crate::linux::cgroup::Driver>,
     ) -> Result<LinuxSandbox, Error> {
         let jail_id = jail_common::gen_jail_id();

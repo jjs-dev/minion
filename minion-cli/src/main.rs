@@ -137,6 +137,7 @@ async fn main() {
             shared_items: options.exposed_paths,
             cpu_time_limit: Duration::from_millis(u64::from(options.time_limit)),
             real_time_limit: Duration::from_millis(u64::from(options.time_limit * 3)),
+            extensions: None,
         })
         .unwrap();
 

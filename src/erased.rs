@@ -4,6 +4,7 @@
 //! Please note that this API is not type-safe. For example, if you pass
 //! `Sandbox` instance to another backend, it will panic.
 
+use anyhow::Context as _;
 use futures_util::{FutureExt, TryFutureExt};
 
 /// Type-erased `Sandbox`
@@ -89,13 +90,35 @@ impl<C: crate::ChildProcess> ChildProcess for C {
 
 /// Type-erased `Backend`
 pub trait Backend: Send + Sync + 'static {
-    fn new_sandbox(&self, options: crate::SandboxOptions) -> anyhow::Result<Box<dyn Sandbox>>;
+    fn new_sandbox(
+        &self,
+        options: crate::SandboxOptions<serde_json::Value>,
+    ) -> anyhow::Result<Box<dyn Sandbox>>;
     fn spawn(&self, options: ChildProcessOptions) -> anyhow::Result<Box<dyn ChildProcess>>;
 }
 
 impl<B: crate::Backend> Backend for B {
-    fn new_sandbox(&self, options: crate::SandboxOptions) -> anyhow::Result<Box<dyn Sandbox>> {
-        let sb = <Self as crate::Backend>::new_sandbox(&self, options)?;
+    fn new_sandbox(
+        &self,
+        options: crate::SandboxOptions<serde_json::Value>,
+    ) -> anyhow::Result<Box<dyn Sandbox>> {
+        let exts = match options.extensions {
+            Some(e) => serde_json::from_value(e)
+                .map(Some)
+                .context("failed to parse sandbox settings extensions")?,
+            None => None,
+        };
+
+        let down_options = crate::SandboxOptions {
+            max_alive_process_count: options.max_alive_process_count,
+            memory_limit: options.memory_limit,
+            cpu_time_limit: options.cpu_time_limit,
+            real_time_limit: options.real_time_limit,
+            isolation_root: options.isolation_root,
+            shared_items: options.shared_items,
+            extensions: exts,
+        };
+        let sb = <Self as crate::Backend>::new_sandbox(&self, down_options)?;
         Ok(Box::new(sb))
     }
 
@@ -123,6 +146,6 @@ pub type ChildProcessOptions = crate::ChildProcessOptions<Box<dyn Sandbox>>;
 /// Returns backend instance
 pub fn setup() -> anyhow::Result<Box<dyn Backend>> {
     Ok(Box::new(crate::linux::LinuxBackend::new(
-        crate::linux::Settings::new(),
+        crate::linux::BackendSettings::new(),
     )?))
 }

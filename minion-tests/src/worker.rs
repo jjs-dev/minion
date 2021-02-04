@@ -27,6 +27,7 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
             dest: "/me".into(),
             kind: minion::SharedItemKind::Readonly,
         }],
+        extensions: None,
     };
     let sandbox = backend.new_sandbox(opts).expect("can not create sandbox");
     let opts = minion::ChildProcessOptions {

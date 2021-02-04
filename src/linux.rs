@@ -208,7 +208,7 @@ fn spawn(mut options: ChildProcessOptions<LinuxSandbox>) -> Result<LinuxChildPro
 /// Allows some customization
 #[non_exhaustive]
 #[derive(Debug, Clone)]
-pub struct Settings {
+pub struct BackendSettings {
     /// All created cgroups will be children of specified group
     /// Default value is "/minion"
     pub cgroup_prefix: PathBuf,
@@ -224,9 +224,9 @@ pub struct Settings {
     pub allow_unsupported_mount_namespace: bool,
 }
 
-impl Default for Settings {
+impl Default for BackendSettings {
     fn default() -> Self {
-        Settings {
+        BackendSettings {
             cgroup_prefix: "/minion".into(),
             allow_unsupported_mount_namespace: false,
             cgroupfs: std::env::var_os("MINION_CGROUPFS")
@@ -236,14 +236,19 @@ impl Default for Settings {
     }
 }
 
-impl Settings {
-    pub fn new() -> Settings {
+impl BackendSettings {
+    pub fn new() -> BackendSettings {
         Default::default()
     }
 }
+
+/// Extended sandbox settings
+#[derive(serde::Deserialize, Default, Debug)]
+pub struct LinuxSandboxOptionsExtensions {}
+
 #[derive(Debug)]
 pub struct LinuxBackend {
-    settings: Settings,
+    settings: BackendSettings,
     cgroup_driver: Arc<cgroup::Driver>,
 }
 
@@ -251,7 +256,11 @@ impl Backend for LinuxBackend {
     type Error = Error;
     type Sandbox = LinuxSandbox;
     type ChildProcess = LinuxChildProcess;
-    fn new_sandbox(&self, mut options: SandboxOptions) -> Result<LinuxSandbox, Error> {
+    type SandboxOptionsExtensions = LinuxSandboxOptionsExtensions;
+    fn new_sandbox(
+        &self,
+        mut options: SandboxOptions<LinuxSandboxOptionsExtensions>,
+    ) -> Result<LinuxSandbox, Error> {
         options.postprocess();
         let sb =
             unsafe { LinuxSandbox::create(options, &self.settings, self.cgroup_driver.clone())? };
@@ -267,7 +276,7 @@ impl Backend for LinuxBackend {
 }
 
 impl LinuxBackend {
-    pub fn new(settings: Settings) -> Result<LinuxBackend, Error> {
+    pub fn new(settings: BackendSettings) -> Result<LinuxBackend, Error> {
         self::check::run_all_feature_checks();
         let cgroup_driver = Arc::new(cgroup::Driver::new(&settings)?);
         Ok(LinuxBackend {

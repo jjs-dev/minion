@@ -2,7 +2,7 @@
 pub fn check(res: &mut CheckResult) {
     #[cfg(target_os = "linux")]
     {
-        crate::linux::check::check(&crate::linux::Settings::default(), res);
+        crate::linux::check::check(&crate::linux::BackendSettings::default(), res);
     }
 }
 

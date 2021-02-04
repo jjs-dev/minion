@@ -34,7 +34,12 @@ pub trait Backend: Debug + Send + Sync + 'static {
     type Error: StdError + Send + Sync + 'static;
     type Sandbox: Sandbox<Error = Self::Error>;
     type ChildProcess: ChildProcess<Error = Self::Error>;
-    fn new_sandbox(&self, options: SandboxOptions) -> Result<Self::Sandbox, Self::Error>;
+    /// Backend-specific sandbox settings
+    type SandboxOptionsExtensions: serde::de::DeserializeOwned;
+    fn new_sandbox(
+        &self,
+        options: SandboxOptions<Self::SandboxOptionsExtensions>,
+    ) -> Result<Self::Sandbox, Self::Error>;
     fn spawn(
         &self,
         options: ChildProcessOptions<Self::Sandbox>,
@@ -80,7 +85,7 @@ pub struct ResourceUsageData {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct SandboxOptions {
+pub struct SandboxOptions<Extensions> {
     pub max_alive_process_count: u32,
     /// Memory limit for all processes in cgroup, in bytes
     pub memory_limit: u64,
@@ -90,9 +95,11 @@ pub struct SandboxOptions {
     pub real_time_limit: Duration,
     pub isolation_root: PathBuf,
     pub shared_items: Vec<SharedItem>,
+    /// Backend-specific extensions
+    pub extensions: Option<Extensions>,
 }
 
-impl SandboxOptions {
+impl<E> SandboxOptions<E> {
     fn make_relative<'a>(&self, p: &'a Path) -> &'a Path {
         if p.starts_with("/") {
             p.strip_prefix("/").unwrap()
