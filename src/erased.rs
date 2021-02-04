@@ -102,8 +102,12 @@ impl<B: crate::Backend> Backend for B {
         &self,
         options: crate::SandboxOptions<serde_json::Value>,
     ) -> anyhow::Result<Box<dyn Sandbox>> {
-        let exts = serde_json::from_value(options.extensions)
-            .context("failed to parse sandbox settings extensions")?;
+        let exts = match options.extensions {
+            Some(e) => serde_json::from_value(e)
+                .map(Some)
+                .context("failed to parse sandbox settings extensions")?,
+            None => None,
+        };
 
         let down_options = crate::SandboxOptions {
             max_alive_process_count: options.max_alive_process_count,

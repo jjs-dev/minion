@@ -35,7 +35,7 @@ pub trait Backend: Debug + Send + Sync + 'static {
     type Sandbox: Sandbox<Error = Self::Error>;
     type ChildProcess: ChildProcess<Error = Self::Error>;
     /// Backend-specific sandbox settings
-    type SandboxOptionsExtensions: serde::de::DeserializeOwned + Default;
+    type SandboxOptionsExtensions: serde::de::DeserializeOwned;
     fn new_sandbox(
         &self,
         options: SandboxOptions<Self::SandboxOptionsExtensions>,
@@ -96,7 +96,7 @@ pub struct SandboxOptions<Extensions> {
     pub isolation_root: PathBuf,
     pub shared_items: Vec<SharedItem>,
     /// Backend-specific extensions
-    pub extensions: Extensions,
+    pub extensions: Option<Extensions>,
 }
 
 impl<E> SandboxOptions<E> {
