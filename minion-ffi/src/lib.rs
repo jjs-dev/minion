@@ -102,7 +102,7 @@ pub struct SandboxOptions {
     pub process_limit: u32,
     pub memory_limit: u32,
     pub isolation_root: *const c_char,
-    pub shared_directories: *const SharedDirectoryAccess,
+    pub shared_items: *const SharedItem,
 }
 
 #[derive(Clone)]
@@ -161,19 +161,20 @@ pub unsafe extern "C" fn minion_sandbox_create(
     options: SandboxOptions,
     out: &mut *mut Sandbox,
 ) -> ErrorCode {
-    let mut exposed_paths = Vec::new();
+    let mut shared_items = Vec::new();
     unsafe {
-        let mut p = options.shared_directories;
+        let mut p = options.shared_items;
         while !(*p).host_path.is_null() {
-            let opt = minion::SharedDir {
+            let opt = minion::SharedItem {
+                id: None,
                 src: get_string((*p).host_path).into(),
                 dest: get_string((*p).sandbox_path).into(),
                 kind: match (*p).kind {
-                    SharedDirectoryAccessKind::Full => minion::SharedDirKind::Full,
-                    SharedDirectoryAccessKind::Readonly => minion::SharedDirKind::Readonly,
+                    SharedItemAccessKind::Full => minion::SharedItemKind::Full,
+                    SharedItemAccessKind::Readonly => minion::SharedItemKind::Readonly,
                 },
             };
-            exposed_paths.push(opt);
+            shared_items.push(opt);
             p = p.offset(1);
         }
     }
@@ -190,7 +191,7 @@ pub unsafe extern "C" fn minion_sandbox_create(
             options.real_time_limit.nanoseconds,
         ),
         isolation_root,
-        exposed_paths,
+        shared_items,
     };
     let d = backend.0.new_sandbox(opts);
     let d = d.unwrap();
@@ -250,24 +251,24 @@ pub struct ChildProcessOptions {
 }
 
 #[repr(C)]
-pub enum SharedDirectoryAccessKind {
+pub enum SharedItemAccessKind {
     Full,
     Readonly,
 }
 
 #[repr(C)]
-pub struct SharedDirectoryAccess {
-    pub kind: SharedDirectoryAccessKind,
+pub struct SharedItem {
+    pub kind: SharedItemAccessKind,
     pub host_path: *const c_char,
     pub sandbox_path: *const c_char,
 }
 
 // minion-ffi will never modify host_path or sandbox_path, so no races can occur
-unsafe impl Sync for SharedDirectoryAccess {}
+unsafe impl Sync for SharedItem {}
 
 #[no_mangle]
-pub static SHARED_DIRECTORY_ACCESS_FIN: SharedDirectoryAccess = SharedDirectoryAccess {
-    kind: SharedDirectoryAccessKind::Full, //doesn't matter
+pub static SHARED_DIRECTORY_ACCESS_FIN: SharedItem = SharedItem {
+    kind: SharedItemAccessKind::Full, //doesn't matter
     host_path: std::ptr::null(),
     sandbox_path: std::ptr::null(),
 };

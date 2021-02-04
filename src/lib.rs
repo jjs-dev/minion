@@ -51,18 +51,21 @@ pub use command::Command;
 ///
 /// Warning: this type is __unstable__ (i.e. not covered by SemVer) and __non-portable__
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum SharedDirKind {
+pub enum SharedItemKind {
     Readonly,
     Full,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct SharedDir {
+pub struct SharedItem {
+    /// Optional identifier.
+    /// It can be used to provide additional backend-specific settings.
+    pub id: Option<String>,
     /// Path on system
     pub src: PathBuf,
     /// Path for child
     pub dest: PathBuf,
-    pub kind: SharedDirKind,
+    pub kind: SharedItemKind,
 }
 
 /// This struct is returned by `Sandbox::resource_usage`
@@ -86,7 +89,7 @@ pub struct SandboxOptions {
     /// Specifies total wall-clock timer limit for whole sandbox
     pub real_time_limit: Duration,
     pub isolation_root: PathBuf,
-    pub exposed_paths: Vec<SharedDir>,
+    pub shared_items: Vec<SharedItem>,
 }
 
 impl SandboxOptions {
@@ -99,11 +102,11 @@ impl SandboxOptions {
     }
 
     fn postprocess(&mut self) {
-        let mut paths = std::mem::replace(&mut self.exposed_paths, Vec::new());
+        let mut paths = std::mem::replace(&mut self.shared_items, Vec::new());
         for x in &mut paths {
             x.dest = self.make_relative(&x.dest).to_path_buf();
         }
-        std::mem::swap(&mut paths, &mut self.exposed_paths);
+        std::mem::swap(&mut paths, &mut self.shared_items);
     }
 }
 

@@ -8,7 +8,7 @@ use crate::{
         },
         Error,
     },
-    SharedDir, SharedDirKind,
+    SharedItem, SharedItemKind,
 };
 use nix::sys::signal;
 use std::{
@@ -49,7 +49,7 @@ fn configure_dir(dir_path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn expose_dir(jail_root: &Path, system_path: &Path, alias_path: &Path, kind: SharedDirKind) {
+fn expose_item(jail_root: &Path, system_path: &Path, alias_path: &Path, kind: SharedItemKind) {
     let bind_target = jail_root.join(alias_path);
     fs::create_dir_all(&bind_target).unwrap();
     let stat = fs::metadata(&system_path)
@@ -72,7 +72,7 @@ fn expose_dir(jail_root: &Path, system_path: &Path, alias_path: &Path, kind: Sha
             err_exit("mount");
         }
 
-        if let SharedDirKind::Readonly = kind {
+        if let SharedItemKind::Readonly = kind {
             let rem_ret = libc::mount(
                 ptr::null(),
                 bind_target.as_ptr(),
@@ -87,10 +87,10 @@ fn expose_dir(jail_root: &Path, system_path: &Path, alias_path: &Path, kind: Sha
     }
 }
 
-pub(crate) fn expose_dirs(expose: &[SharedDir], jail_root: &Path) {
+pub(crate) fn expose_items(expose: &[SharedItem], jail_root: &Path) {
     // mount --bind
     for x in expose {
-        expose_dir(jail_root, &x.src, &x.dest, x.kind.clone())
+        expose_item(jail_root, &x.src, &x.dest, x.kind.clone())
     }
 }
 
@@ -183,7 +183,7 @@ fn setup_time_watch(
 }
 
 fn setup_expositions(options: &JailOptions) {
-    expose_dirs(&options.exposed_paths, &options.isolation_root);
+    expose_items(&options.shared_items, &options.isolation_root);
 }
 
 fn setup_panic_hook() {
