@@ -198,7 +198,7 @@ impl Driver {
 
     #[tracing::instrument]
     pub(in crate::linux) fn new(
-        settings: &crate::linux::Settings,
+        settings: &crate::linux::BackendSettings,
     ) -> Result<Driver, crate::linux::Error> {
         let mut configs = Vec::new();
         for &cgroup_version in &[CgroupVersion::V1, CgroupVersion::V2] {

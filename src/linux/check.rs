@@ -1,7 +1,7 @@
 use crate::linux::cgroup::Driver;
 
 /// `crate::check()` on linux
-pub fn check(settings: &crate::linux::Settings, res: &mut crate::check::CheckResult) {
+pub fn check(settings: &crate::linux::BackendSettings, res: &mut crate::check::CheckResult) {
     if !pidfd_supported() {
         res.warning("PID file descriptors not supported")
     }
