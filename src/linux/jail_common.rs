@@ -1,4 +1,4 @@
-use crate::{linux::util::Pid, SharedDir};
+use crate::{linux::util::Pid, SharedItem};
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::{ffi::OsString, os::unix::io::RawFd, path::PathBuf, time::Duration};
@@ -14,7 +14,7 @@ pub(crate) struct JailOptions {
     /// Possible value: time_limit * 3.
     pub(crate) real_time_limit: Duration,
     pub(crate) isolation_root: PathBuf,
-    pub(crate) exposed_paths: Vec<SharedDir>,
+    pub(crate) shared_items: Vec<SharedItem>,
     pub(crate) jail_id: String,
     pub(crate) watchdog_chan: RawFd,
     pub(crate) allow_mount_ns_failure: bool,

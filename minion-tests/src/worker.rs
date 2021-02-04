@@ -21,10 +21,11 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
         max_alive_process_count: test_case.process_count_limit(),
         memory_limit: MEMORY_LIMIT_IN_BYTES,
         isolation_root: tempdir.path().to_path_buf(),
-        exposed_paths: vec![minion::SharedDir {
+        shared_items: vec![minion::SharedItem {
+            id: None,
             src: std::env::current_exe().unwrap(),
             dest: "/me".into(),
-            kind: minion::SharedDirKind::Readonly,
+            kind: minion::SharedItemKind::Readonly,
         }],
     };
     let sandbox = backend.new_sandbox(opts).expect("can not create sandbox");

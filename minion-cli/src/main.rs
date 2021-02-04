@@ -16,7 +16,7 @@ fn parse_env_item(src: &str) -> Result<EnvItem, &'static str> {
     })
 }
 
-fn parse_path_exposition_item(src: &str) -> Result<minion::SharedDir, String> {
+fn parse_path_exposition_item(src: &str) -> Result<minion::SharedItem, String> {
     let parts = src.splitn(3, ':').collect::<Vec<_>>();
     if parts.len() != 3 {
         return Err(format!(
@@ -32,8 +32,8 @@ fn parse_path_exposition_item(src: &str) -> Result<minion::SharedDir, String> {
         ));
     }
     let kind = match amask {
-        "rwx" => minion::SharedDirKind::Full,
-        "r-x" => minion::SharedDirKind::Readonly,
+        "rwx" => minion::SharedItemKind::Full,
+        "r-x" => minion::SharedItemKind::Readonly,
         _ => {
             return Err(format!(
                 "unknown access mask {}. rwx or r-x expected",
@@ -41,7 +41,8 @@ fn parse_path_exposition_item(src: &str) -> Result<minion::SharedDir, String> {
             ));
         }
     };
-    Ok(minion::SharedDir {
+    Ok(minion::SharedItem {
+        id: None,
         src: parts[0].to_string().into(),
         dest: parts[2].to_string().into(),
         kind,
@@ -96,7 +97,7 @@ struct ExecOpt {
         long = "expose",
         parse(try_from_str = parse_path_exposition_item)
     )]
-    exposed_paths: Vec<minion::SharedDir>,
+    exposed_paths: Vec<minion::SharedItem>,
 
     /// Process working dir, relative to `isolation_root`
     #[structopt(short = "p", long = "pwd", default_value = "/")]
@@ -133,7 +134,7 @@ async fn main() {
             max_alive_process_count: options.num_processes.min(u32::max_value() as usize) as u32,
             memory_limit: options.memory_limit as u64,
             isolation_root: options.isolation_root.into(),
-            exposed_paths: options.exposed_paths,
+            shared_items: options.exposed_paths,
             cpu_time_limit: Duration::from_millis(u64::from(options.time_limit)),
             real_time_limit: Duration::from_millis(u64::from(options.time_limit * 3)),
         })
