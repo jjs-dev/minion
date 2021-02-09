@@ -25,8 +25,10 @@ use std::{
     fs,
     os::unix::io::{IntoRawFd, RawFd},
     path::PathBuf,
-    sync::atomic::{AtomicI64, Ordering},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicI64, Ordering},
+        Arc,
+    },
 };
 
 pub type LinuxHandle = libc::c_int;
@@ -36,8 +38,8 @@ pub struct LinuxChildProcess {
     stdin: Option<LinuxWritePipe>,
     stdout: Option<LinuxReadPipe>,
     stderr: Option<LinuxReadPipe>,
-    sandbox_ref: LinuxSandbox,
-    /// Child pid, relative to sandbox namespace.
+    sandbox_ref: Arc<LinuxSandbox>,
+
     pid: Pid,
     /// FD of object which will be readable when child finishes.
     /// Wrapped in Option to catch user errors.

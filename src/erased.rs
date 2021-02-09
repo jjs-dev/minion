@@ -3,6 +3,7 @@
 //!
 //! Please note that this API is not type-safe. For example, if you pass
 //! `Sandbox` instance to another backend, it will panic.
+use std::{any::Any, sync::Arc};
 
 use futures_util::{FutureExt, TryFutureExt};
 
@@ -13,16 +14,7 @@ pub trait Sandbox: std::fmt::Debug + Send + Sync + 'static {
     fn check_real_tle(&self) -> anyhow::Result<bool>;
     fn kill(&self) -> anyhow::Result<()>;
     fn resource_usage(&self) -> anyhow::Result<crate::ResourceUsageData>;
-    #[doc(hidden)]
-    fn clone_to_box(&self) -> Box<dyn Sandbox>;
-    #[doc(hidden)]
-    fn clone_into_box_any(&self) -> Box<dyn std::any::Any>;
-}
-
-impl Clone for Box<dyn Sandbox> {
-    fn clone(&self) -> Self {
-        self.clone_to_box()
-    }
+    fn into_arc_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'static>;
 }
 
 impl<S: crate::Sandbox> Sandbox for S {
@@ -41,12 +33,8 @@ impl<S: crate::Sandbox> Sandbox for S {
     fn resource_usage(&self) -> anyhow::Result<crate::ResourceUsageData> {
         self.resource_usage().map_err(Into::into)
     }
-    fn clone_to_box(&self) -> Box<dyn Sandbox> {
-        Box::new(self.clone())
-    }
-
-    fn clone_into_box_any(&self) -> Box<dyn std::any::Any> {
-        Box::new(self.clone())
+    fn into_arc_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'static> {
+        self
     }
 }
 
@@ -89,36 +77,33 @@ impl<C: crate::ChildProcess> ChildProcess for C {
 
 /// Type-erased `Backend`
 pub trait Backend: Send + Sync + 'static {
-    fn new_sandbox(&self, options: crate::SandboxOptions) -> anyhow::Result<Box<dyn Sandbox>>;
+    fn new_sandbox(&self, options: crate::SandboxOptions) -> anyhow::Result<Arc<dyn Sandbox>>;
     fn spawn(&self, options: ChildProcessOptions) -> anyhow::Result<Box<dyn ChildProcess>>;
 }
 
 impl<B: crate::Backend> Backend for B {
-    fn new_sandbox(&self, options: crate::SandboxOptions) -> anyhow::Result<Box<dyn Sandbox>> {
+    fn new_sandbox(&self, options: crate::SandboxOptions) -> anyhow::Result<Arc<dyn Sandbox>> {
         let sb = <Self as crate::Backend>::new_sandbox(&self, options)?;
-        Ok(Box::new(sb))
+        Ok(Arc::new(sb))
     }
 
     fn spawn(&self, options: ChildProcessOptions) -> anyhow::Result<Box<dyn ChildProcess>> {
-        let down_sandbox = options
-            .sandbox
-            .clone_into_box_any()
-            .downcast()
-            .expect("sandbox type mismatch");
+        let any_sandbox = options.sandbox.clone().into_arc_any();
+        let down_sandbox = any_sandbox.downcast().expect("sandbox type mismatch");
         let down_options = crate::ChildProcessOptions {
             arguments: options.arguments,
             environment: options.environment,
             path: options.path,
             pwd: options.pwd,
             stdio: options.stdio,
-            sandbox: *down_sandbox,
+            sandbox: down_sandbox,
         };
         let cp = <Self as crate::Backend>::spawn(&self, down_options)?;
         Ok(Box::new(cp))
     }
 }
 
-pub type ChildProcessOptions = crate::ChildProcessOptions<Box<dyn Sandbox>>;
+pub type ChildProcessOptions = crate::ChildProcessOptions<dyn Sandbox>;
 
 /// Returns backend instance
 pub fn setup() -> anyhow::Result<Box<dyn Backend>> {

@@ -2,12 +2,13 @@ use crate::{erased, InputSpecification, OutputSpecification, StdioSpecification}
 use std::{
     ffi::{OsStr, OsString},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 /// Child process builder
 #[derive(Default, Debug)]
 pub struct Command {
-    sandbox: Option<Box<dyn erased::Sandbox>>,
+    sandbox: Option<Arc<dyn erased::Sandbox>>,
     exe: Option<PathBuf>,
     argv: Vec<OsString>,
     env: Vec<OsString>,
@@ -56,7 +57,7 @@ impl Command {
         backend.spawn(options)
     }
 
-    pub fn sandbox(&mut self, sandbox: Box<dyn erased::Sandbox>) -> &mut Self {
+    pub fn sandbox(&mut self, sandbox: Arc<dyn erased::Sandbox>) -> &mut Self {
         self.sandbox.replace(sandbox);
         self
     }
