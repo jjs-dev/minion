@@ -26,6 +26,7 @@ use std::{
     error::Error as StdError,
     fmt::Debug,
     io::{Read, Write},
+    sync::Arc,
     time::Duration,
 };
 
@@ -111,7 +112,7 @@ impl SandboxOptions {
 }
 
 /// Represents highly-isolated sandbox
-pub trait Sandbox: Clone + Debug + Send + Sync + 'static {
+pub trait Sandbox: Debug + Send + Sync + 'static {
     type Error: StdError + Send + Sync + 'static;
     fn id(&self) -> String;
 
@@ -227,11 +228,11 @@ pub struct StdioSpecification {
 /// This type should only be used by Backend implementations
 /// Use `Command` instead
 #[derive(Debug, Clone)]
-pub struct ChildProcessOptions<Sandbox> {
+pub struct ChildProcessOptions<Sandbox: ?Sized> {
     pub path: PathBuf,
     pub arguments: Vec<OsString>,
     pub environment: Vec<OsString>,
-    pub sandbox: Sandbox,
+    pub sandbox: Arc<Sandbox>,
     pub stdio: StdioSpecification,
     /// Child's working dir. Relative to `sandbox` isolation_root
     pub pwd: PathBuf,

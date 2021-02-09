@@ -49,11 +49,8 @@ impl SandboxState {
     }
 }
 
-#[derive(Clone)]
-pub struct LinuxSandbox(Arc<LinuxSandboxInner>);
-
 #[repr(C)]
-struct LinuxSandboxInner {
+pub struct LinuxSandbox {
     id: String,
     options: SandboxOptions,
     zygote_sock: Mutex<Socket>,
@@ -76,12 +73,12 @@ struct LinuxSandboxDebugHelper<'a> {
 impl Debug for LinuxSandbox {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let h = LinuxSandboxDebugHelper {
-            id: &self.0.id,
-            options: &self.0.options,
-            zygote_sock: self.0.zygote_sock.lock().unwrap().as_raw_fd(),
-            zygote_pid: self.0.zygote_pid,
-            watchdog_chan: self.0.watchdog_chan,
-            state: self.0.state.snapshot(),
+            id: &self.id,
+            options: &self.options,
+            zygote_sock: self.zygote_sock.lock().unwrap().as_raw_fd(),
+            zygote_pid: self.zygote_pid,
+            watchdog_chan: self.watchdog_chan,
+            state: self.state.snapshot(),
         };
 
         h.fmt(f)
@@ -92,28 +89,28 @@ impl Sandbox for LinuxSandbox {
     type Error = Error;
 
     fn id(&self) -> String {
-        self.0.id.clone()
+        self.id.clone()
     }
 
     fn check_cpu_tle(&self) -> Result<bool, Error> {
         self.poll_state()?;
-        Ok(self.0.state.was_cpu_tle.load(SeqCst))
+        Ok(self.state.was_cpu_tle.load(SeqCst))
     }
 
     fn check_real_tle(&self) -> Result<bool, Error> {
         self.poll_state()?;
-        Ok(self.0.state.was_wall_tle.load(SeqCst))
+        Ok(self.state.was_wall_tle.load(SeqCst))
     }
 
     fn kill(&self) -> Result<(), Error> {
-        jail_common::kill_sandbox(self.0.zygote_pid, &self.0.id, &self.0.cgroup_driver)
+        jail_common::kill_sandbox(self.zygote_pid, &self.id, &self.cgroup_driver)
             .map_err(|err| Error::Io { cause: err })?;
         Ok(())
     }
 
     fn resource_usage(&self) -> Result<crate::ResourceUsageData, Error> {
-        let cpu_usage = self.0.cgroup_driver.get_cpu_usage(&self.0.id)?;
-        let memory_usage = self.0.cgroup_driver.get_memory_usage(&self.0.id)?;
+        let cpu_usage = self.cgroup_driver.get_cpu_usage(&self.id)?;
+        let memory_usage = self.cgroup_driver.get_memory_usage(&self.id)?;
         Ok(crate::ResourceUsageData {
             memory: memory_usage,
             time: Some(cpu_usage),
@@ -132,7 +129,7 @@ impl LinuxSandbox {
     fn poll_state(&self) -> Result<(), Error> {
         for _ in 0..5 {
             let mut buf = [0; 4];
-            let num_read = nix::unistd::read(self.0.watchdog_chan, &mut buf).or_else(|err| {
+            let num_read = nix::unistd::read(self.watchdog_chan, &mut buf).or_else(|err| {
                 if let Some(errno) = err.as_errno() {
                     if errno as i32 == libc::EAGAIN {
                         return Ok(0);
@@ -144,7 +141,7 @@ impl LinuxSandbox {
                 break;
             }
             for ch in &buf[..num_read] {
-                self.0.state.process_flag(*ch)?;
+                self.state.process_flag(*ch)?;
             }
         }
 
@@ -178,7 +175,7 @@ impl LinuxSandbox {
         };
         let startup_info = zygote::start_zygote(jail_options, &cgroup_driver)?;
 
-        let inner = LinuxSandboxInner {
+        let sandbox = LinuxSandbox {
             id: jail_id,
             options,
             zygote_sock: Mutex::new(startup_info.socket),
@@ -191,7 +188,7 @@ impl LinuxSandbox {
             cgroup_driver,
         };
 
-        Ok(LinuxSandbox(Arc::new(inner)))
+        Ok(sandbox)
     }
 
     pub(crate) unsafe fn spawn_job(
@@ -200,7 +197,7 @@ impl LinuxSandbox {
     ) -> Result<(jail_common::JobStartupInfo, RawFd), Error> {
         let q = jail_common::Query::Spawn(query.job_query.clone());
 
-        let mut sock = self.0.zygote_sock.lock().unwrap();
+        let mut sock = self.zygote_sock.lock().unwrap();
 
         // note that we ignore errors, because zygote can be already killed for some reason
         sock.send(&q).ok();
@@ -219,7 +216,7 @@ impl LinuxSandbox {
 
     pub(crate) fn get_exit_code(&self, pid: Pid) -> ExitCode {
         let q = jail_common::Query::GetExitCode(jail_common::GetExitCodeQuery { pid });
-        let mut sock = self.0.zygote_sock.lock().unwrap();
+        let mut sock = self.zygote_sock.lock().unwrap();
         sock.send(&q).ok();
         match sock.recv::<i32>() {
             Ok(ec) => ExitCode(ec.into()),
@@ -230,24 +227,17 @@ impl LinuxSandbox {
 
 impl Drop for LinuxSandbox {
     fn drop(&mut self) {
-        match Arc::get_mut(&mut self.0) {
-            // we are last Sandbox handle, so we can drop it
-            Some(_) => (),
-            // there are other handles, so we must not do anyhing
-            None => return,
-        };
         // Kill all processes.
         if let Err(err) = self.kill() {
             panic!("unable to kill sandbox: {}", err);
         }
         // Remove cgroups.
         if std::env::var("MINION_DEBUG_KEEP_CGROUPS").is_err() {
-            self.0
-                .cgroup_driver
-                .drop_cgroup(&self.0.id, &["pids", "memory", "cpuacct"]);
+            self.cgroup_driver
+                .drop_cgroup(&self.id, &["pids", "memory", "cpuacct"]);
         }
 
         // Close handles
-        nix::unistd::close(self.0.watchdog_chan).ok();
+        nix::unistd::close(self.watchdog_chan).ok();
     }
 }

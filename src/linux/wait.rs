@@ -1,8 +1,12 @@
 //! Implements wait future
-use crate::{linux::util::Pid, linux::LinuxSandbox, ExitCode};
+use crate::{
+    linux::{util::Pid, LinuxSandbox},
+    ExitCode,
+};
 use std::{
     os::unix::io::RawFd,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::io::unix::AsyncFd;
@@ -36,7 +40,7 @@ pub struct WaitFuture {
     /// FD of underlying event source (either pidfd or unix socket)
     // TODO: use pipe instead of socket
     inner: AsyncFd<OwnedFd>,
-    sandbox: LinuxSandbox,
+    sandbox: Arc<LinuxSandbox>,
     pid: Pid,
 }
 
@@ -44,7 +48,7 @@ impl WaitFuture {
     pub(crate) fn new(
         fd: RawFd,
         pid: Pid,
-        sandbox: LinuxSandbox,
+        sandbox: Arc<LinuxSandbox>,
     ) -> Result<Self, crate::linux::Error> {
         let inner = AsyncFd::new(OwnedFd(fd))?;
         Ok(WaitFuture {

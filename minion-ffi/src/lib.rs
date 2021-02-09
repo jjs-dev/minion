@@ -5,6 +5,7 @@ use std::{
     ffi::{CStr, OsStr, OsString},
     mem::{self},
     os::raw::c_char,
+    sync::Arc,
 };
 
 #[repr(i32)]
@@ -106,7 +107,7 @@ pub struct SandboxOptions {
 }
 
 #[derive(Clone)]
-pub struct Sandbox(Box<dyn minion::erased::Sandbox>);
+pub struct Sandbox(Arc<dyn minion::erased::Sandbox>);
 
 /// # Safety
 /// `out` must be valid
