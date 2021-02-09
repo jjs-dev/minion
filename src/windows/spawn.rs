@@ -1,3 +1,5 @@
+mod attr_list;
+
 use crate::{
     windows::{
         pipe::{self, ReadPipe, WritePipe},
@@ -6,6 +8,7 @@ use crate::{
     },
     InputSpecificationData, OutputSpecificationData,
 };
+use attr_list::AttrList;
 use std::{
     ffi::{OsStr, OsString},
     mem::size_of,
@@ -15,15 +18,10 @@ use std::{
     },
 };
 use winapi::{
-    shared::{minwindef::TRUE, winerror::ERROR_INSUFFICIENT_BUFFER},
+    shared::minwindef::TRUE,
     um::{
-        errhandlingapi::GetLastError,
         handleapi::INVALID_HANDLE_VALUE,
-        minwinbase::SECURITY_ATTRIBUTES,
-        processthreadsapi::{
-            CreateProcessW, DeleteProcThreadAttributeList, InitializeProcThreadAttributeList,
-            UpdateProcThreadAttribute, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_LIST,
-        },
+        processthreadsapi::{CreateProcessW, PROCESS_INFORMATION},
         winbase::{
             CreateFileMappingA, CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT,
             STARTF_USESTDHANDLES, STARTUPINFOEXW,
@@ -147,76 +145,22 @@ pub(in crate::windows) struct ChildParams {
 // TODO: upstream to winapi: https://github.com/retep998/winapi-rs/pull/933/
 const MAGIC_PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES: usize = 131081;
 
-struct AlignedMemBlock(*mut u8, usize);
-
-impl AlignedMemBlock {
-    fn layout(cnt: usize) -> std::alloc::Layout {
-        assert!(cnt > 0);
-        std::alloc::Layout::from_size_align(cnt, 8).unwrap()
-    }
-
-    fn new(cnt: usize) -> AlignedMemBlock {
-        let ptr = unsafe { std::alloc::alloc_zeroed(Self::layout(cnt)) };
-        AlignedMemBlock(ptr, cnt)
-    }
-
-    fn ptr(&self) -> *mut u8 {
-        self.0
-    }
-}
-
-impl Drop for AlignedMemBlock {
-    fn drop(&mut self) {
-        unsafe {
-            std::alloc::dealloc(self.0, Self::layout(self.1));
-        }
-    }
-}
-
 pub(in crate::windows) fn spawn(
     sandbox: &WindowsSandbox,
     stdio: Stdio,
     params: ChildParams,
 ) -> Result<PROCESS_INFORMATION, Error> {
-    let proc_thread_attr_list_storage;
     let mut security_capabilities;
+    let mut proc_thread_attr_list = AttrList::new(1)?;
     let mut startup_info = unsafe {
         let mut startup_info: STARTUPINFOEXW = std::mem::zeroed();
-        let mut proc_thread_attr_list_len = 0;
-        {
-            InitializeProcThreadAttributeList(
-                std::ptr::null_mut(),
-                // we need only one attribute: security capabilities.
-                1,
-                0,
-                &mut proc_thread_attr_list_len,
-            );
-            if GetLastError() != ERROR_INSUFFICIENT_BUFFER {
-                return Err(Error::last());
-            }
-        }
-        proc_thread_attr_list_storage = AlignedMemBlock::new(proc_thread_attr_list_len);
-        let proc_thread_attr_list = proc_thread_attr_list_storage.ptr();
-        startup_info.lpAttributeList = proc_thread_attr_list.cast();
-        Cvt::nonzero(InitializeProcThreadAttributeList(
-            startup_info.lpAttributeList,
-            1,
-            0,
-            &mut proc_thread_attr_list_len,
-        ))?;
+
         security_capabilities = sandbox.profile.get_security_capabilities();
-        Cvt::nonzero(UpdateProcThreadAttribute(
-            startup_info.lpAttributeList,
-            // reserved
-            0,
+
+        proc_thread_attr_list.add_attr::<SECURITY_CAPABILITIES>(
             MAGIC_PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
-            (&mut security_capabilities as *mut SECURITY_CAPABILITIES).cast(),
-            std::mem::size_of::<SECURITY_ATTRIBUTES>(),
-            // reserved
-            std::ptr::null_mut(),
-            // reserved
-            std::ptr::null_mut(),
-        ))?;
+            &mut security_capabilities,
+        )?;
 
         startup_info.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
         startup_info.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
@@ -229,21 +173,24 @@ pub(in crate::windows) fn spawn(
         startup_info.StartupInfo.hStdInput = cvt_handle(stdio.stdin);
         startup_info.StartupInfo.hStdOutput = cvt_handle(stdio.stdout);
         startup_info.StartupInfo.hStdError = cvt_handle(stdio.stderr);
+
+        startup_info.lpAttributeList = proc_thread_attr_list.borrow_ptr();
         startup_info
     };
     let creation_flags = CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
     let mut info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+    let application_name: Vec<u16> = params.exe.encode_wide().collect();
+    let mut cmd_line = application_name.clone();
+    for arg in params.argv {
+        quote_arg(&mut cmd_line, &arg);
+    }
+    let (mut env, env_status) = encode_env(&params.env);
+    if let EncodeEnvResult::Partial = env_status {
+        tracing::warn!("skipped zero chars in provided environment");
+    }
+    let cwd: Vec<u16> = params.cwd.encode_wide().collect();
+
     unsafe {
-        let application_name: Vec<u16> = params.exe.encode_wide().collect();
-        let mut cmd_line = application_name.clone();
-        for arg in params.argv {
-            quote_arg(&mut cmd_line, &arg);
-        }
-        let (mut env, env_status) = encode_env(&params.env);
-        if let EncodeEnvResult::Partial = env_status {
-            tracing::warn!("skipped zero chars in provided environment");
-        }
-        let cwd: Vec<u16> = params.cwd.encode_wide().collect();
         Cvt::nonzero(CreateProcessW(
             application_name.as_ptr(),
             cmd_line.as_mut_ptr(),
@@ -259,7 +206,6 @@ pub(in crate::windows) fn spawn(
             (&mut startup_info as *mut STARTUPINFOEXW).cast(),
             &mut info,
         ))?;
-        DeleteProcThreadAttributeList(startup_info.lpAttributeList);
     }
     Ok(info)
 }
