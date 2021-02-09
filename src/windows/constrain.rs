@@ -3,12 +3,11 @@
 use std::{ffi::OsString, os::windows::ffi::OsStrExt};
 
 use crate::{
-    windows::{Cvt, Error},
+    windows::{util::OwnedHandle, Cvt, Error},
     ResourceUsageData,
 };
 
 use winapi::um::{
-    handleapi::CloseHandle,
     jobapi2::{
         AssignProcessToJobObject, CreateJobObjectW, QueryInformationJobObject,
         SetInformationJobObject, TerminateJobObject,
@@ -25,11 +24,8 @@ use winapi::um::{
 /// Responsible for resource isolation & adding & killing
 #[derive(Debug)]
 pub(crate) struct Job {
-    handle: HANDLE,
+    handle: OwnedHandle,
 }
-
-unsafe impl Send for Job {}
-unsafe impl Sync for Job {}
 
 impl Job {
     pub(crate) fn new(jail_id: &str) -> Result<Self, Error> {
@@ -38,6 +34,7 @@ impl Job {
         let handle = unsafe {
             Cvt::nonzero(CreateJobObjectW(std::ptr::null_mut(), name.as_ptr()) as i32)? as HANDLE
         };
+        let handle = OwnedHandle::new(handle);
         Ok(Self { handle })
     }
     pub(crate) fn enable_resource_limits(
@@ -60,7 +57,7 @@ impl Job {
             | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         unsafe {
             Cvt::nonzero(SetInformationJobObject(
-                self.handle,
+                self.handle.as_raw(),
                 JobObjectExtendedLimitInformation,
                 (&mut info as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
                 sizeof::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>(),
@@ -69,16 +66,22 @@ impl Job {
         Ok(())
     }
     pub(crate) fn kill(&self) -> Result<(), Error> {
-        unsafe { Cvt::nonzero(TerminateJobObject(self.handle, 0xDEADBEEF)).map(|_| ()) }
+        unsafe { Cvt::nonzero(TerminateJobObject(self.handle.as_raw(), 0xDEADBEEF)).map(|_| ()) }
     }
     pub(crate) fn add_process(&self, process_handle: HANDLE) -> Result<(), Error> {
-        unsafe { Cvt::nonzero(AssignProcessToJobObject(self.handle, process_handle)).map(|_| ()) }
+        unsafe {
+            Cvt::nonzero(AssignProcessToJobObject(
+                self.handle.as_raw(),
+                process_handle,
+            ))
+            .map(|_| ())
+        }
     }
     pub(crate) fn resource_usage(&self) -> Result<crate::ResourceUsageData, Error> {
         let cpu = unsafe {
             let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = std::mem::zeroed();
             Cvt::nonzero(QueryInformationJobObject(
-                self.handle,
+                self.handle.as_raw(),
                 JobObjectBasicAccountingInformation,
                 (&mut info as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
                 sizeof::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>(),
@@ -92,7 +95,7 @@ impl Job {
         let memory = unsafe {
             let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
             Cvt::nonzero(QueryInformationJobObject(
-                self.handle,
+                self.handle.as_raw(),
                 JobObjectExtendedLimitInformation,
                 (&mut info as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
                 sizeof::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>(),
@@ -110,7 +113,7 @@ impl Job {
         unsafe {
             let mut info: JOBOBJECT_LIMIT_VIOLATION_INFORMATION = std::mem::zeroed();
             Cvt::nonzero(QueryInformationJobObject(
-                self.handle,
+                self.handle.as_raw(),
                 JobObjectLimitViolationInformation,
                 (&mut info as *mut JOBOBJECT_LIMIT_VIOLATION_INFORMATION).cast(),
                 sizeof::<JOBOBJECT_LIMIT_VIOLATION_INFORMATION>(),
@@ -124,14 +127,6 @@ impl Job {
     pub(crate) fn check_real_tle(&self) -> Result<bool, Error> {
         // TODO
         Ok(false)
-    }
-}
-
-impl Drop for Job {
-    fn drop(&mut self) {
-        unsafe {
-            CloseHandle(self.handle);
-        }
     }
 }
 

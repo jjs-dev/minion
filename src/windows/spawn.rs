@@ -21,9 +21,8 @@ use winapi::{
         handleapi::INVALID_HANDLE_VALUE,
         minwinbase::SECURITY_ATTRIBUTES,
         processthreadsapi::{
-            CreateProcessW, DeleteProcThreadAttributeList,
-            InitializeProcThreadAttributeList, UpdateProcThreadAttribute, PROCESS_INFORMATION,
-            PROC_THREAD_ATTRIBUTE_LIST,
+            CreateProcessW, DeleteProcThreadAttributeList, InitializeProcThreadAttributeList,
+            UpdateProcThreadAttribute, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_LIST,
         },
         winbase::{
             CreateFileMappingA, CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT,
