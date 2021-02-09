@@ -152,6 +152,9 @@ fn get_filter(matches: &clap::ArgMatches) -> Box<dyn Fn(&'static dyn TestCase) -
 }
 
 fn check_static() {
+    if cfg!(not(target_os = "linux")) {
+        return;
+    }
     let ldd_output = std::process::Command::new("ldd")
         .arg(std::env::current_exe().unwrap())
         .output()

@@ -21,11 +21,10 @@ use winapi::{
         handleapi::INVALID_HANDLE_VALUE,
         minwinbase::SECURITY_ATTRIBUTES,
         processthreadsapi::{
-            CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcess,
+            CreateProcessW, DeleteProcThreadAttributeList,
             InitializeProcThreadAttributeList, UpdateProcThreadAttribute, PROCESS_INFORMATION,
             PROC_THREAD_ATTRIBUTE_LIST,
         },
-        userenv::{CreateAppContainerProfile, DeleteAppContainerProfile},
         winbase::{
             CreateFileMappingA, CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT,
             STARTF_USESTDHANDLES, STARTUPINFOEXW,

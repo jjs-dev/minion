@@ -20,6 +20,8 @@ use winapi::{
 pub(crate) struct Profile {
     /// Pointer to the Security Identifier (SID) of this container
     sid: PSID,
+    /// Profile name (used in destructor)
+    profile_name: Vec<u16>,
 }
 
 unsafe impl Send for Profile {}
@@ -33,7 +35,6 @@ impl Profile {
         let profile_name = OsString::from(format!("minion-sandbox-appcontainer-{}", sandbox_id));
         let mut profile_name: Vec<u16> = profile_name.encode_wide().collect();
         profile_name.push(0);
-        let profile_name = profile_name.as_ptr();
         let mut sid = std::ptr::null_mut();
         unsafe {
             let mut sid_string_repr = std::ptr::null_mut();
@@ -51,15 +52,15 @@ impl Profile {
         }
         unsafe {
             Cvt::hresult(CreateAppContainerProfile(
-                profile_name,
-                profile_name,
-                profile_name,
+                profile_name.as_ptr(),
+                profile_name.as_ptr(),
+                profile_name.as_ptr(),
                 std::ptr::null_mut(),
                 0,
                 &mut sid,
             ))?;
         }
-        Ok(Profile { sid })
+        Ok(Profile { sid, profile_name })
     }
     /// Returns `SECURITY_CAPABILITIES` representing this container.
     #[instrument(skip(self))]
@@ -75,6 +76,9 @@ impl Drop for Profile {
     fn drop(&mut self) {
         unsafe {
             FreeSid(self.sid);
+            if let Err(e) = Cvt::hresult(DeleteAppContainerProfile(self.profile_name.as_ptr())) {
+                tracing::warn!(error = %e, "Ignoring resource cleanup error");
+            }
         }
     }
 }
