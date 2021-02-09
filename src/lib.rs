@@ -120,7 +120,7 @@ impl SandboxOptions {
 /// Represents highly-isolated sandbox
 pub trait Sandbox: Debug + Send + Sync + 'static {
     type Error: StdError + Send + Sync + 'static;
-    fn id(&self) -> &str;
+    fn id(&self) -> String;
 
     /// Returns true if sandbox exceeded CPU time limit
     fn check_cpu_tle(&self) -> Result<bool, Self::Error>;

@@ -1,5 +1,4 @@
 use crate::{linux::util::Pid, SharedItem};
-use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::{ffi::OsString, os::unix::io::RawFd, path::PathBuf, time::Duration};
 use tiny_nix_ipc::Socket;

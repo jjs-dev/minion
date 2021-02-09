@@ -18,7 +18,7 @@ pub trait Sandbox: std::fmt::Debug + Send + Sync + 'static {
 }
 
 impl<S: crate::Sandbox> Sandbox for S {
-    fn id(&self) -> &str {
+    fn id(&self) -> String {
         self.id()
     }
     fn check_cpu_tle(&self) -> anyhow::Result<bool> {
