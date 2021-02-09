@@ -1,5 +1,8 @@
 //! Implements wait future
-use crate::{linux::util::Pid, linux::LinuxSandbox, ExitCode};
+use crate::{
+    linux::{util::Pid, LinuxSandbox},
+    ExitCode,
+};
 use std::{
     os::unix::io::RawFd,
     pin::Pin,

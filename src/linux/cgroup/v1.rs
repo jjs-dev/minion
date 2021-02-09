@@ -1,7 +1,9 @@
 //! Implements Cgroup Driver for V1 cgroups
 use crate::linux::cgroup::{CgroupError, ResourceLimits};
-use std::os::unix::io::{IntoRawFd, RawFd};
-use std::path::PathBuf;
+use std::{
+    os::unix::io::{IntoRawFd, RawFd},
+    path::PathBuf,
+};
 
 impl super::Driver {
     fn v1_write_file(

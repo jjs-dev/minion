@@ -17,8 +17,9 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1.0.6
         with:
-          toolchain: stable
+          toolchain: nightly
           components: rustfmt
+          override: true
       - name: Check formatting
         run: |
           rm -rf .cargo

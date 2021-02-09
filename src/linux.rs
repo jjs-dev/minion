@@ -25,8 +25,10 @@ use std::{
     fs,
     os::unix::io::{IntoRawFd, RawFd},
     path::PathBuf,
-    sync::atomic::{AtomicI64, Ordering},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicI64, Ordering},
+        Arc,
+    },
 };
 
 pub type LinuxHandle = libc::c_int;
