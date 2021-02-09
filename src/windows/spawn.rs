@@ -1,6 +1,7 @@
 use crate::{
     windows::{
         pipe::{self, ReadPipe, WritePipe},
+        util::OwnedHandle,
         Cvt, Error, WindowsSandbox,
     },
     InputSpecificationData, OutputSpecificationData,
@@ -17,7 +18,7 @@ use winapi::{
     shared::{minwindef::TRUE, winerror::ERROR_INSUFFICIENT_BUFFER},
     um::{
         errhandlingapi::GetLastError,
-        handleapi::{CloseHandle, INVALID_HANDLE_VALUE},
+        handleapi::INVALID_HANDLE_VALUE,
         minwinbase::SECURITY_ATTRIBUTES,
         processthreadsapi::{
             CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcess,
@@ -34,46 +35,49 @@ use winapi::{
 };
 
 pub(in crate::windows) struct Stdio {
-    pub stdin: HANDLE,
-    pub stdout: HANDLE,
-    pub stderr: HANDLE,
+    pub stdin: Option<OwnedHandle>,
+    pub stdout: Option<OwnedHandle>,
+    pub stderr: Option<OwnedHandle>,
 }
 
 impl Stdio {
     fn make_input(
         spec: crate::InputSpecificationData,
-    ) -> Result<(HANDLE, Option<WritePipe>), Error> {
+    ) -> Result<(Option<OwnedHandle>, Option<WritePipe>), Error> {
         match spec {
-            InputSpecificationData::Handle(h) => Ok((h as HANDLE, None)),
+            InputSpecificationData::Handle(h) => Ok((Some(OwnedHandle::new(h as HANDLE)), None)),
             InputSpecificationData::Pipe => {
                 let (reader, writer) = pipe::make(pipe::InheritKind::Allow)?;
-                Ok((reader.into_raw_handle(), Some(writer)))
+                Ok((
+                    Some(OwnedHandle::new(reader.into_raw_handle())),
+                    Some(writer),
+                ))
             }
-            InputSpecificationData::Empty => Ok((open_empty_readable_file(), None)),
-            InputSpecificationData::Null => Ok((-1_i32 as usize as HANDLE, None)),
+            InputSpecificationData::Empty => Ok((Some(open_empty_readable_file()), None)),
+            InputSpecificationData::Null => Ok((None, None)),
         }
     }
 
     fn make_output(
         spec: crate::OutputSpecificationData,
-    ) -> Result<(HANDLE, Option<ReadPipe>), Error> {
+    ) -> Result<(Option<OwnedHandle>, Option<ReadPipe>), Error> {
         match spec {
-            OutputSpecificationData::Handle(h) => Ok((h as HANDLE, None)),
+            OutputSpecificationData::Handle(h) => Ok((Some(OwnedHandle::new(h as HANDLE)), None)),
             OutputSpecificationData::Pipe => {
                 let (reader, writer) = pipe::make(pipe::InheritKind::Allow)?;
-                Ok((writer.into_raw_handle(), Some(reader)))
+                Ok((
+                    Some(OwnedHandle::new(writer.into_raw_handle())),
+                    Some(reader),
+                ))
             }
-            OutputSpecificationData::Null => Ok((-1_i32 as usize as HANDLE, None)),
+            OutputSpecificationData::Null => Ok((None, None)),
             OutputSpecificationData::Ignore => {
                 let file = std::fs::File::create("C:\\NUL").map_err(|io_err| Error::Syscall {
                     errno: io_err.raw_os_error().unwrap_or(-1) as u32,
                 })?;
-                let file = file.into_raw_handle();
-                let cloned_file = crate::windows::util::duplicate_with_inheritance(file)?;
-                unsafe {
-                    CloseHandle(file);
-                }
-                Ok((cloned_file, None))
+                let file = OwnedHandle::new(file.into_raw_handle());
+                let cloned_file = file.try_clone_with_inheritance()?;
+                Ok((Some(cloned_file), None))
             }
             OutputSpecificationData::Buffer(sz) => unsafe {
                 let sz = sz.unwrap_or(usize::max_value()) as u64;
@@ -88,8 +92,12 @@ impl Stdio {
                 if mmap.is_null() {
                     Cvt::nonzero(0)?;
                 }
-                let child_side = crate::windows::util::duplicate_with_inheritance(mmap)?;
-                Ok((child_side, Some(ReadPipe::from_raw_handle(mmap))))
+                let mmap = OwnedHandle::new(mmap);
+                let child_side = mmap.try_clone_with_inheritance()?;
+                Ok((
+                    Some(child_side),
+                    Some(ReadPipe::from_raw_handle(mmap.into_inner())),
+                ))
             },
         }
     }
@@ -117,14 +125,17 @@ impl Stdio {
     }
 }
 
-fn open_empty_readable_file() -> HANDLE {
-    static EMPTY_FILE_HANDLE: once_cell::sync::Lazy<usize> = once_cell::sync::Lazy::new(|| {
-        let (reader, writer) =
-            pipe::make(pipe::InheritKind::Allow).expect("failed to create a pipe");
-        drop(writer);
-        reader.into_raw_handle() as usize
-    });
-    *EMPTY_FILE_HANDLE as HANDLE
+fn open_empty_readable_file() -> OwnedHandle {
+    static EMPTY_FILE_HANDLE: once_cell::sync::Lazy<OwnedHandle> =
+        once_cell::sync::Lazy::new(|| {
+            let (reader, writer) =
+                pipe::make(pipe::InheritKind::Allow).expect("failed to create a pipe");
+            drop(writer);
+            OwnedHandle::new(reader.into_raw_handle())
+        });
+    EMPTY_FILE_HANDLE
+        .try_clone()
+        .expect("failed to clone a handle")
 }
 
 pub(in crate::windows) struct ChildParams {
@@ -211,9 +222,15 @@ pub(in crate::windows) fn spawn(
 
         startup_info.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
         startup_info.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-        startup_info.StartupInfo.hStdInput = stdio.stdin;
-        startup_info.StartupInfo.hStdOutput = stdio.stdout;
-        startup_info.StartupInfo.hStdError = stdio.stderr;
+
+        let cvt_handle = |h: Option<OwnedHandle>| {
+            h.map(OwnedHandle::into_inner)
+                .unwrap_or(INVALID_HANDLE_VALUE)
+        };
+
+        startup_info.StartupInfo.hStdInput = cvt_handle(stdio.stdin);
+        startup_info.StartupInfo.hStdOutput = cvt_handle(stdio.stdout);
+        startup_info.StartupInfo.hStdError = cvt_handle(stdio.stderr);
         startup_info
     };
     let creation_flags = CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;

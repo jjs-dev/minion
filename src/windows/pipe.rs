@@ -1,115 +1,54 @@
-use crate::windows::{Cvt, Error};
+use crate::windows::{util::OwnedHandle, Cvt, Error};
 use std::os::windows::io::{FromRawHandle, IntoRawHandle, RawHandle};
 use winapi::{
     shared::minwindef::TRUE,
-    um::{
-        handleapi::CloseHandle, minwinbase::SECURITY_ATTRIBUTES, namedpipeapi::CreatePipe,
-        winnt::HANDLE,
-    },
+    um::{minwinbase::SECURITY_ATTRIBUTES, namedpipeapi::CreatePipe},
 };
 
 #[derive(Debug)]
 pub struct ReadPipe {
-    handle: HANDLE,
+    handle: OwnedHandle,
 }
-
-unsafe impl Send for ReadPipe {}
-unsafe impl Sync for ReadPipe {}
 
 impl IntoRawHandle for ReadPipe {
     fn into_raw_handle(self) -> RawHandle {
-        let h = self.handle;
-        std::mem::forget(self);
-        h
+        self.handle.into_inner()
     }
 }
 
 impl FromRawHandle for ReadPipe {
     unsafe fn from_raw_handle(handle: RawHandle) -> Self {
-        ReadPipe { handle }
+        ReadPipe {
+            handle: OwnedHandle::new(handle),
+        }
     }
 }
 
 impl std::io::Read for ReadPipe {
-    fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
-        if buf.len() > i32::max_value() as usize {
-            buf = &mut buf[..(i32::max_value() as usize)]
-        }
-        let mut read_cnt = 0;
-        let res = unsafe {
-            winapi::um::fileapi::ReadFile(
-                self.handle,
-                buf.as_mut_ptr().cast(),
-                buf.len() as u32,
-                &mut read_cnt,
-                std::ptr::null_mut(),
-            )
-        };
-
-        if res == 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(read_cnt as usize)
-    }
-}
-
-impl Drop for ReadPipe {
-    fn drop(&mut self) {
-        unsafe {
-            CloseHandle(self.handle);
-        }
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.handle.read(buf)
     }
 }
 
 #[derive(Debug)]
 pub struct WritePipe {
-    handle: HANDLE,
+    handle: OwnedHandle,
 }
-
-unsafe impl Send for WritePipe {}
-unsafe impl Sync for WritePipe {}
 
 impl IntoRawHandle for WritePipe {
     fn into_raw_handle(self) -> RawHandle {
-        let h = self.handle;
-        std::mem::forget(self);
-        h
+        self.handle.into_inner()
     }
 }
 
 impl std::io::Write for WritePipe {
-    fn write(&mut self, mut buf: &[u8]) -> std::io::Result<usize> {
-        if buf.len() > (i32::max_value() as usize) {
-            buf = &buf[..(i32::max_value() as usize)];
-        }
-        let mut written_cnt = 0;
-        let res = unsafe {
-            winapi::um::fileapi::WriteFile(
-                self.handle,
-                buf.as_ptr().cast(),
-                buf.len() as u32,
-                &mut written_cnt,
-                std::ptr::null_mut(),
-            )
-        };
-        if res != 0 {
-            Ok(written_cnt as usize)
-        } else {
-            Err(std::io::Error::last_os_error())
-        }
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.handle.write(buf)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
         // no need to flush
         Ok(())
-    }
-}
-
-impl Drop for WritePipe {
-    fn drop(&mut self) {
-        unsafe {
-            CloseHandle(self.handle);
-        }
     }
 }
 
@@ -133,5 +72,12 @@ pub(in crate::windows) fn make(inherit: InheritKind) -> Result<(ReadPipe, WriteP
             0,
         ))?;
     }
-    Ok((ReadPipe { handle: read }, WritePipe { handle: write }))
+    Ok((
+        ReadPipe {
+            handle: OwnedHandle::new(read),
+        },
+        WritePipe {
+            handle: OwnedHandle::new(write),
+        },
+    ))
 }

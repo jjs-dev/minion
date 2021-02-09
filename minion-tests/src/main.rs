@@ -64,7 +64,8 @@ static WORKER_ENV_NAME: &str = "__MINION_ROLE_IS_WORKER__";
 static TEST_ENV_NAME: &str = "__MINION_ROLE_IS_TEST__";
 fn main() {
     tracing_subscriber::fmt()
-        .with_writer(std::io::stdout)
+        .pretty()
+        .with_writer(std::io::stderr)
         .init();
     let test_cases = &*tests::TESTS;
     let role = get_role();

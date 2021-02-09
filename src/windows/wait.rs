@@ -1,5 +1,5 @@
 //! Implements windows WaitFuture
-use crate::windows::{Cvt, Error};
+use crate::windows::{util::OwnedHandle, Cvt, Error};
 use futures_util::task::AtomicWaker;
 use std::{
     pin::Pin,
@@ -19,28 +19,22 @@ use winapi::{
         processthreadsapi::{GetExitCodeProcess, GetProcessId},
         synchapi::WaitForSingleObject,
         winbase::WAIT_OBJECT_0,
-        winnt::HANDLE,
     },
 };
 
 /// Resolves when child has finished
 pub struct WaitFuture {
     /// Child handle
-    child: HANDLE,
+    child: OwnedHandle,
     /// None if background thread has not been started yet
     shared: Option<Arc<Shared>>,
 }
-
-// HANDLE is Send-able...
-unsafe impl Send for WaitFuture {}
-// ..and Sync
-unsafe impl Sync for WaitFuture {}
 
 impl WaitFuture {
     fn get_exit_code(&self) -> Result<Option<crate::ExitCode>, Error> {
         let mut exit_code = 0;
         unsafe {
-            Cvt::nonzero(GetExitCodeProcess(self.child, &mut exit_code))?;
+            Cvt::nonzero(GetExitCodeProcess(self.child.as_raw(), &mut exit_code))?;
         }
         if exit_code == STILL_ACTIVE {
             return Ok(None);
@@ -71,15 +65,20 @@ impl std::future::Future for WaitFuture {
             let thread_name = unsafe {
                 format!(
                     "minion-background-wait-{}",
-                    Cvt::nonzero(GetProcessId(this.child) as i32).unwrap_or(-1)
+                    Cvt::nonzero(GetProcessId(this.child.as_raw()) as i32).unwrap_or(-1)
                 )
             };
 
-            let child_handle = this.child.clone() as usize;
+            let child_handle = match this.child.try_clone() {
+                Ok(cl) => cl,
+                Err(err) => {
+                    return Poll::Ready(Err(err));
+                }
+            };
 
             std::thread::Builder::new()
                 .name(thread_name)
-                .spawn(move || background_waiter(shared, child_handle as HANDLE))
+                .spawn(move || background_waiter(shared, child_handle))
                 .expect("Failed to create a thread");
         }
 
@@ -108,7 +107,7 @@ struct Shared {
     error: AtomicBool,
 }
 
-fn background_waiter(mut shared: Arc<Shared>, handle: HANDLE) {
+fn background_waiter(mut shared: Arc<Shared>, handle: OwnedHandle) {
     loop {
         // check if someone is still interested in our work
         if Arc::get_mut(&mut shared).is_some() {
@@ -118,7 +117,7 @@ fn background_waiter(mut shared: Arc<Shared>, handle: HANDLE) {
         }
 
         // wait for one second
-        let res = unsafe { WaitForSingleObject(handle, 1000) };
+        let res = unsafe { WaitForSingleObject(handle.as_raw(), 1000) };
         if res == WAIT_OBJECT_0 {
             shared.waker.wake();
             return;

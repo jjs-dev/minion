@@ -23,8 +23,8 @@ impl WindowsSandbox {
 impl crate::Sandbox for WindowsSandbox {
     type Error = Error;
 
-    fn id(&self) -> &str {
-        todo!()
+    fn id(&self) -> String {
+        self.id.clone()
     }
 
     fn kill(&self) -> Result<(), Self::Error> {

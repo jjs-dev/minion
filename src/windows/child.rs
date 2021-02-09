@@ -1,16 +1,16 @@
 use crate::windows::{
     spawn::{spawn, ChildParams, Stdio},
+    util::OwnedHandle,
     Error, ReadPipe, WindowsSandbox, WritePipe,
 };
-use winapi::um::{handleapi::CloseHandle, winnt::HANDLE};
 
 #[derive(Debug)]
 pub struct WindowsChildProcess {
     /// Handle to winapi Process object
-    child: HANDLE,
+    child: OwnedHandle,
 
     /// Handle to main process of child
-    main_thread: HANDLE,
+    main_thread: OwnedHandle,
 
     /// Stdin
     stdin: Option<WritePipe>,
@@ -18,15 +18,6 @@ pub struct WindowsChildProcess {
     stdout: Option<ReadPipe>,
     /// Stderr
     stderr: Option<ReadPipe>,
-}
-
-impl Drop for WindowsChildProcess {
-    fn drop(&mut self) {
-        unsafe {
-            CloseHandle(self.main_thread);
-            CloseHandle(self.child);
-        }
-    }
 }
 
 impl WindowsChildProcess {
@@ -46,8 +37,8 @@ impl WindowsChildProcess {
         )?;
 
         Ok(WindowsChildProcess {
-            child: info.hProcess,
-            main_thread: info.hThread,
+            child: OwnedHandle::new(info.hProcess),
+            main_thread: OwnedHandle::new(info.hThread),
             stdin: child_stdin,
             stdout: child_stdout,
             stderr: child_stderr,
