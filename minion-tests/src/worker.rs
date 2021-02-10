@@ -30,7 +30,12 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
     };
     let sandbox = backend.new_sandbox(opts).expect("can not create sandbox");
     let opts = minion::ChildProcessOptions {
-        path: "/me".into(),
+        path: if cfg!(target_os = "linux") {
+            "/me".into()
+        } else {
+            // TEMPORARY WIP-ONLY HACK
+            std::env::current_exe().unwrap()
+        },
         arguments: vec![test_case.name().into()],
         environment: vec![format!("{}=1", crate::TEST_ENV_NAME).into()],
         stdio: minion::StdioSpecification {
