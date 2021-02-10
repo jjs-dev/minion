@@ -117,9 +117,9 @@ jobs:
         with:
           path: ./target
           key: ${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-      - name: Build tests (musl)
+      - name: Build tests
         run: |
-          powershell ci/windows-builds.ps1
+          powershell ci/windows-build.ps1
         timeout-minutes: 5
       - uses: actions/upload-artifact@v2
         with:
@@ -127,13 +127,15 @@ jobs:
           name: tests-windows
           retention-days: 2
   
-  tests-windows:
+  tests-windows-run:
     strategy:
       matrix:
         rust-target:
           - 'x86_64-pc-windows-gnu'
           - 'x86_64-pc-windows-msvc'
     runs-on: windows-latest
+    needs:
+      - tests-windows-build
     steps:
       - uses: actions/checkout@v2
       - uses: actions/download-artifact@v1

@@ -5,6 +5,7 @@ function Build-JJSForTarget {
     param($TargetName)
 
     New-Item -ItemType directory -Path ./tests/$TargetName
+    Write-Output "::group::Building for $TargetName"
     cargo build -p minion-tests -Zunstable-options --out-dir=./tests/$TargetName --target=$TargetName
 
     if ($LASTEXITCODE -ne 0) {
