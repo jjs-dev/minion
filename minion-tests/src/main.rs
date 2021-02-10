@@ -66,6 +66,7 @@ fn main() {
     tracing_subscriber::fmt()
         .pretty()
         .with_writer(std::io::stderr)
+        .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
         .init();
     let test_cases = &*tests::TESTS;
     let role = get_role();
