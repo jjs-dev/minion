@@ -68,11 +68,11 @@ impl Job {
     pub(crate) fn kill(&self) -> Result<(), Error> {
         unsafe { Cvt::nonzero(TerminateJobObject(self.handle.as_raw(), 0xDEADBEEF)).map(|_| ()) }
     }
-    pub(crate) fn add_process(&self, process_handle: HANDLE) -> Result<(), Error> {
+    pub(crate) fn add_process(&self, process_handle: &OwnedHandle) -> Result<(), Error> {
         unsafe {
             Cvt::nonzero(AssignProcessToJobObject(
                 self.handle.as_raw(),
-                process_handle,
+                process_handle.as_raw(),
             ))
             .map(|_| ())
         }

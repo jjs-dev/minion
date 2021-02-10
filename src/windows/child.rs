@@ -35,9 +35,11 @@ impl WindowsChildProcess {
                 cwd: options.pwd.into(),
             },
         )?;
+        let child = OwnedHandle::new(info.hProcess);
+        options.sandbox.job.add_process(&child)?;
 
         Ok(WindowsChildProcess {
-            child: OwnedHandle::new(info.hProcess),
+            child,
             main_thread: OwnedHandle::new(info.hThread),
             stdin: child_stdin,
             stdout: child_stdout,
