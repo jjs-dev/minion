@@ -100,7 +100,33 @@ jobs:
         with:
           path: /tmp/logs
           name: tests-trace-${{ matrix.cgroups }}-${{ matrix.os }}
-
+  tests-windows-build:
+    runs-on: 'windows-2019'
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1.0.6
+        with:
+          # nightly is used for cargo --out-dir option.
+          toolchain: nightly
+          override: true
+      - name: Install targets
+        run: |
+          rustup target add x86_64-pc-windows-gnu
+          rustup target add x86_64-pc-windows-msvc
+      - uses: actions/cache@v2
+        with:
+          path: ./target
+          key: ${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Build tests (musl)
+        run: |
+          powershell ci/windows-builds.ps1
+        timeout-minutes: 5
+      - uses: actions/upload-artifact@v2
+        with:
+          path: ./tests
+          name: tests-windows
+          retention-days: 2
+  
   tests-windows:
     strategy:
       matrix:
@@ -110,10 +136,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1.0.6
-        with: 
-          toolchain: stable
-          override: true
+      - uses: actions/download-artifact@v1
+        with:
+          path: ./tests
+          name: tests-windows
       - name: Test
         run: powershell ci/windows.ps1
         timeout-minutes: 5
@@ -123,13 +149,13 @@ jobs:
         if: always()
         run: |
           ls
-          mkdir D:/ci-logs
-          cp ./strace* D:/ci-logs
-          ls D:/ci-logs
+          mkdir ./ci-logs
+          cp ./strace* ./ci-logs
+          ls ./ci-logs
       - uses: actions/upload-artifact@v1
         if: always()
         with:
-          path: D:/ci-logs
+          path: ./ci-logs
           name: tests-ntcalls
 
   nightly-checks:
