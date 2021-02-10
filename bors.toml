@@ -4,6 +4,8 @@ status = [
 'clippy',
 'tests-linux-run (ubuntu-20.04, x86_64-unknown-linux-musl, cgroup-v1)',
 'tests-linux-run (macos-latest, x86_64-unknown-linux-musl, cgroup-v2)',
+'tests-windows-run (x86_64-pc-windows-gnu)',
+'tests-windows-run (x86_64-pc-windows-msvc)',
 'nightly-checks',
 ]
 delete-merged-branches = true
