@@ -107,7 +107,11 @@ pub type ChildProcessOptions = crate::ChildProcessOptions<dyn Sandbox>;
 
 /// Returns backend instance
 pub fn setup() -> anyhow::Result<Box<dyn Backend>> {
-    Ok(Box::new(crate::linux::LinuxBackend::new(
+    #[cfg(target_os = "linux")]
+    return Ok(Box::new(crate::linux::LinuxBackend::new(
         crate::linux::Settings::new(),
-    )?))
+    )?));
+
+    #[cfg(target_os = "windows")]
+    return Ok(Box::new(crate::windows::WindowsBackend::new()));
 }

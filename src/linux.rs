@@ -122,7 +122,7 @@ fn handle_output_io(spec: OutputSpecification) -> Result<(Option<RawFd>, RawFd),
             Ok((Some(h_read), f))
         }
         OutputSpecificationData::Ignore => {
-            let file = fs::File::open("/dev/null")?;
+            let file = fs::File::create("/dev/null")?;
             let file = file.into_raw_fd();
             let fd = unsafe { libc::dup(file) };
             Ok((None, fd))

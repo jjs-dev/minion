@@ -4,7 +4,6 @@ use std::{
     os::unix::io::{IntoRawFd, RawFd},
     path::PathBuf,
 };
-
 impl super::Driver {
     fn v1_write_file(
         &self,

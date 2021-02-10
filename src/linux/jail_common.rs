@@ -1,5 +1,4 @@
 use crate::{linux::util::Pid, SharedItem};
-use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::{ffi::OsString, os::unix::io::RawFd, path::PathBuf, time::Duration};
 use tiny_nix_ipc::Socket;
@@ -18,19 +17,6 @@ pub(crate) struct JailOptions {
     pub(crate) jail_id: String,
     pub(crate) watchdog_chan: RawFd,
     pub(crate) allow_mount_ns_failure: bool,
-}
-
-const ID_CHARS: &[u8] = b"qwertyuiopasdfghjklzxcvbnm1234567890";
-const ID_SIZE: usize = 8;
-
-pub(crate) fn gen_jail_id() -> String {
-    let mut gen = rand::thread_rng();
-    let mut out = Vec::new();
-    for _i in 0..ID_SIZE {
-        let ch = *(ID_CHARS.choose(&mut gen).unwrap());
-        out.push(ch);
-    }
-    String::from_utf8_lossy(&out[..]).to_string()
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

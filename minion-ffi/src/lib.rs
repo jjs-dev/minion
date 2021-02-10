@@ -2,7 +2,7 @@
 #![cfg_attr(minion_nightly, warn(unsafe_op_in_unsafe_fn))]
 use minion::{self};
 use std::{
-    ffi::{CStr, OsStr, OsString},
+    ffi::{CStr, OsString},
     mem::{self},
     os::raw::c_char,
     sync::Arc,
@@ -42,11 +42,23 @@ pub enum WaitOutcome {
 
 /// # Safety
 /// `buf` must be valid, readable pointer
+#[cfg(target_os = "linux")]
 unsafe fn get_string(buf: *const c_char) -> OsString {
     use std::os::unix::ffi::OsStrExt;
     let buf = unsafe { CStr::from_ptr(buf) };
     let buf = buf.to_bytes();
-    let s = OsStr::from_bytes(buf);
+    let s = std::ffi::OsStr::from_bytes(buf);
+    s.to_os_string()
+}
+/// # Safety
+/// `buf` must be valid, readable pointer
+#[cfg(target_os = "windows")]
+unsafe fn get_string(buf: *const c_char) -> OsString {
+    use std::os::windows::ffi::OsStringExt;
+    let buf = unsafe { CStr::from_ptr(buf) };
+    let buf = buf.to_bytes();
+    assert!(buf.len() % 2 == 0);
+    let s = OsString::from_wide(unsafe { buf.align_to::<u16>().1 });
     s.to_os_string()
 }
 
