@@ -153,7 +153,7 @@ pub(in crate::windows) fn spawn(
     stdio: Stdio,
     params: ChildParams,
 ) -> Result<PROCESS_INFORMATION, Error> {
-    tracing::info!(params = ?params, sandbox = ?sandbox, stdio = ?stdio, "Creating child process");
+    tracing::debug!(params = ?params, sandbox = ?sandbox, stdio = ?stdio, "Creating child process");
     let mut security_capabilities;
     let mut proc_thread_attr_list = AttrList::new(1)?;
     let mut startup_info = unsafe {
