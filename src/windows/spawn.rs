@@ -23,8 +23,8 @@ use winapi::{
         handleapi::INVALID_HANDLE_VALUE,
         processthreadsapi::{CreateProcessW, PROCESS_INFORMATION},
         winbase::{
-            CreateFileMappingA, CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT,
-            STARTF_USESTDHANDLES, STARTUPINFOEXW,
+            CreateFileMappingA, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
+            EXTENDED_STARTUPINFO_PRESENT, STARTF_USESTDHANDLES, STARTUPINFOEXW,
         },
         winnt::{HANDLE, PAGE_READWRITE, SECURITY_CAPABILITIES},
     },
@@ -177,7 +177,8 @@ pub(in crate::windows) fn spawn(
         startup_info.lpAttributeList = proc_thread_attr_list.borrow_ptr();
         startup_info
     };
-    let creation_flags = CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
+    let creation_flags =
+        CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED;
     let mut info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
     let application_name: Vec<u16> = params.exe.encode_wide().collect();
     let mut cmd_line = application_name.clone();
