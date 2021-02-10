@@ -30,6 +30,7 @@ use winapi::{
     },
 };
 
+#[derive(Debug)]
 pub(in crate::windows) struct Stdio {
     pub stdin: Option<OwnedHandle>,
     pub stdout: Option<OwnedHandle>,
@@ -134,6 +135,7 @@ fn open_empty_readable_file() -> OwnedHandle {
         .expect("failed to clone a handle")
 }
 
+#[derive(Debug)]
 pub(in crate::windows) struct ChildParams {
     pub exe: OsString,
     /// Does not contain argv[0] - will be prepended automatically.
@@ -145,11 +147,13 @@ pub(in crate::windows) struct ChildParams {
 // TODO: upstream to winapi: https://github.com/retep998/winapi-rs/pull/933/
 const MAGIC_PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES: usize = 131081;
 
+#[tracing::instrument(skip(sandbox, stdio, params), fields(sandbox_id = sandbox.id.as_str()))]
 pub(in crate::windows) fn spawn(
     sandbox: &WindowsSandbox,
     stdio: Stdio,
     params: ChildParams,
 ) -> Result<PROCESS_INFORMATION, Error> {
+    tracing::info!(params = ?params, sandbox = ?sandbox, stdio = ?stdio, "Creating child process");
     let mut security_capabilities;
     let mut proc_thread_attr_list = AttrList::new(1)?;
     let mut startup_info = unsafe {

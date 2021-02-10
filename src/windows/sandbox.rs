@@ -5,7 +5,7 @@ use tracing::instrument;
 pub struct WindowsSandbox {
     pub(crate) job: Job,
     pub(crate) profile: Profile,
-    id: String,
+    pub(crate) id: String,
 }
 
 impl WindowsSandbox {
