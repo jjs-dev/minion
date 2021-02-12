@@ -7,8 +7,10 @@ mod main_loop;
 mod setup;
 
 use crate::linux::{
+    fd::Fd,
+    ipc::Socket,
     jail_common::{self, JailOptions},
-    util::{duplicate_string, err_exit, IpcSocketExt, Pid, Uid},
+    util::{duplicate_string, err_exit, Pid, Uid},
     Error,
 };
 use libc::c_char;
@@ -21,7 +23,6 @@ use std::{
     path::PathBuf,
     ptr,
 };
-use tiny_nix_ipc::Socket;
 
 use jail_common::ZygoteStartupInfo;
 use setup::SetupData;
@@ -29,24 +30,22 @@ use setup::SetupData;
 const SANDBOX_INTERNAL_UID: Uid = 179;
 
 struct Stdio {
-    stdin: RawFd,
-    stdout: RawFd,
-    stderr: RawFd,
+    stdin: Fd,
+    stdout: Fd,
+    stderr: Fd,
 }
 
 impl Stdio {
-    fn from_fd_array(fds: [RawFd; 3]) -> Stdio {
+    fn from_fd_array(fds: [Fd; 3]) -> Stdio {
+        let mut fds = std::array::IntoIter::new(fds);
+        let stdin = fds.next().unwrap();
+        let stdout = fds.next().unwrap();
+        let stderr = fds.next().unwrap();
         Stdio {
-            stdin: fds[0],
-            stdout: fds[1],
-            stderr: fds[2],
+            stdin,
+            stdout,
+            stderr,
         }
-    }
-
-    fn close_fds(self) {
-        nix::unistd::close(self.stdin).ok();
-        nix::unistd::close(self.stdout).ok();
-        nix::unistd::close(self.stderr).ok();
     }
 }
 
@@ -61,6 +60,7 @@ struct JobOptions {
 pub(crate) struct ZygoteOptions<'a> {
     jail_options: JailOptions,
     sock: Socket,
+    uid_mapping_done: Fd,
     cgroup_driver: &'a crate::linux::cgroup::Driver,
 }
 
@@ -69,7 +69,6 @@ struct DoExecArg<'a> {
     arguments: &'a [OsString],
     environment: &'a [OsString],
     stdio: Stdio,
-    sock: Socket,
     pwd: &'a OsStr,
     join_handle: &'a crate::linux::cgroup::JoinHandle,
     jail_id: &'a str,
@@ -87,8 +86,6 @@ fn duplicate_string_list(v: &[OsString]) -> *mut *mut c_char {
     mem::forget(res);
     ret
 }
-
-const WAIT_MESSAGE_CLASS_EXECVE_PERMITTED: &[u8] = b"EXECVE";
 
 // This function is called, when execve() returned ENOENT, to provide additional information on best effort basis.
 fn print_diagnostics(path: &OsStr, out: &mut dyn Write) {
@@ -131,7 +128,7 @@ fn print_diagnostics(path: &OsStr, out: &mut dyn Write) {
     }
 }
 
-fn do_exec(mut arg: DoExecArg) -> ! {
+fn do_exec(arg: DoExecArg) -> ! {
     use std::os::unix::io::FromRawFd;
     unsafe {
         let stderr_fd = libc::dup(2);
@@ -196,13 +193,11 @@ fn do_exec(mut arg: DoExecArg) -> ! {
         if libc::setuid(SANDBOX_INTERNAL_UID as u32) != 0 {
             err_exit("setuid");
         }
-        // Now we pause ourselves until parent process places us into appropriate groups.
-        arg.sock.lock(WAIT_MESSAGE_CLASS_EXECVE_PERMITTED).unwrap();
 
         // Call dup2 as late as possible for all panics to write to normal stdio instead of pipes.
-        libc::dup2(arg.stdio.stdin, libc::STDIN_FILENO);
-        libc::dup2(arg.stdio.stdout, libc::STDOUT_FILENO);
-        libc::dup2(arg.stdio.stderr, libc::STDERR_FILENO);
+        libc::dup2(arg.stdio.stdin.as_raw(), libc::STDIN_FILENO);
+        libc::dup2(arg.stdio.stdout.as_raw(), libc::STDOUT_FILENO);
+        libc::dup2(arg.stdio.stderr.as_raw(), libc::STDERR_FILENO);
 
         let mut logger = crate::linux::util::StraceLogger::new();
         writeln!(logger, "sandbox {}: ready to execve", arg.jail_id).unwrap();
@@ -237,17 +232,12 @@ fn spawn_job(
     setup_data: &SetupData,
     jail_id: String,
 ) -> Result<jail_common::JobStartupInfo, Error> {
-    let (mut sock, mut child_sock) = Socket::new_socketpair().unwrap();
-    child_sock
-        .no_cloexec()
-        .expect("Couldn't make child socket inheritable");
     // `dea` will be passed to child process
     let dea = DoExecArg {
         path: options.exe.as_os_str(),
         arguments: &options.argv,
         environment: &options.env,
         stdio: options.stdio,
-        sock: child_sock,
         pwd: &options.pwd,
         join_handle: &setup_data.cgroup_join_handle,
         jail_id: &jail_id,
@@ -257,28 +247,19 @@ fn spawn_job(
         nix::unistd::ForkResult::Child => do_exec(dea),
         nix::unistd::ForkResult::Parent { child } => child,
     };
-    // Parent
-    dea.stdio.close_fds();
-
-    // Now we can allow child to execve()
-    sock.wake(WAIT_MESSAGE_CLASS_EXECVE_PERMITTED)?;
 
     Ok(jail_common::JobStartupInfo {
         pid: child_pid.as_raw(),
     })
 }
 
-const WM_CLASS_SETUP_FINISHED: &[u8] = b"WM_SETUP";
-const WM_CLASS_PID_MAP_READY_FOR_SETUP: &[u8] = b"WM_SETUP_READY";
-const WM_CLASS_PID_MAP_CREATED: &[u8] = b"WM_PIDMAP_DONE";
-
 pub(in crate::linux) fn start_zygote(
     jail_options: JailOptions,
     cgroup_driver: &crate::linux::cgroup::Driver,
 ) -> Result<jail_common::ZygoteStartupInfo, Error> {
-    let (socket, zyg_sock) = Socket::new_socketpair().unwrap();
+    let (socket, zyg_sock) = Socket::pair()?;
 
-    let (return_allowed_r, return_allowed_w) = nix::unistd::pipe().expect("couldn't create pipe");
+    let (return_allowed_r, return_allowed_w) = nix::unistd::pipe()?;
 
     match unsafe { nix::unistd::fork() }? {
         nix::unistd::ForkResult::Child => {
@@ -295,16 +276,20 @@ pub(in crate::linux) fn start_zygote(
                     Err(err)
                 }
             })?;
+            let (uid_mapping_done_r, uid_mapping_done_w) = nix::unistd::pipe()?;
             match unsafe { nix::unistd::fork() }? {
-                nix::unistd::ForkResult::Child => {
-                    start_zygote_main_process(jail_options, socket, zyg_sock, cgroup_driver)
-                }
+                nix::unistd::ForkResult::Child => start_zygote_main_process(
+                    jail_options,
+                    Fd::new(uid_mapping_done_r),
+                    zyg_sock,
+                    cgroup_driver,
+                ),
                 nix::unistd::ForkResult::Parent { child } => start_zygote_initialization_helper(
                     zyg_sock,
                     child.as_raw(),
                     jail_options,
-                    socket,
                     return_allowed_w,
+                    Fd::new(uid_mapping_done_w),
                     sandbox_uid.as_raw(),
                 )
                 .map(|never| match never {}),
@@ -348,8 +333,8 @@ fn start_zygote_initialization_helper(
     zyg_sock: Socket,
     child_pid: Pid,
     jail_options: JailOptions,
-    mut socket: Socket,
     return_allowed_w: RawFd,
+    uid_mappindg_done: Fd,
     sandbox_uid: u32,
 ) -> Result<std::convert::Infallible, Error> {
     let mut logger = crate::linux::util::strace_logger();
@@ -368,12 +353,15 @@ fn start_zygote_initialization_helper(
     let uid_map_path = format!("/proc/{}/uid_map", child_pid);
     let gid_map_path = format!("/proc/{}/gid_map", child_pid);
     let setgroups_path = format!("/proc/{}/setgroups", child_pid);
-    socket.lock(WM_CLASS_PID_MAP_READY_FOR_SETUP)?;
+    //socket.lock(WM_CLASS_PID_MAP_READY_FOR_SETUP)?;
     fs::write(setgroups_path, "deny").unwrap();
     fs::write(&uid_map_path, mapping.as_str()).unwrap();
     fs::write(&gid_map_path, mapping.as_str()).unwrap();
-    socket.wake(WM_CLASS_PID_MAP_CREATED)?;
-    socket.lock(WM_CLASS_SETUP_FINISHED)?;
+    uid_mappindg_done
+        .write(b"D")
+        .expect("failed to notify zygote that UIDs are remapped");
+    //socket.wake(WM_CLASS_PID_MAP_CREATED)?;
+    //socket.lock(WM_CLASS_SETUP_FINISHED)?;
     // And now thread A can return.
     nix::unistd::write(return_allowed_w, &child_pid.to_ne_bytes()).expect("protocol violation");
     unsafe {
@@ -384,7 +372,7 @@ fn start_zygote_initialization_helper(
 /// Thread C is zygote main process
 fn start_zygote_main_process(
     jail_options: JailOptions,
-    socket: Socket,
+    uid_mapping_done: Fd,
     zyg_sock: Socket,
     cgroup_driver: &crate::linux::cgroup::Driver,
 ) -> ! {
@@ -395,10 +383,10 @@ fn start_zygote_main_process(
         &jail_options.jail_id
     )
     .unwrap();
-    mem::drop(socket);
     let zyg_opts = ZygoteOptions {
         jail_options,
         sock: zyg_sock,
+        uid_mapping_done,
         cgroup_driver,
     };
     let zygote_ret_code = main_loop::entry(zyg_opts);

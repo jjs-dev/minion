@@ -5,7 +5,6 @@ use std::{
     io,
     os::unix::{ffi::OsStrExt, io::RawFd},
 };
-use tiny_nix_ipc::{self, Socket};
 
 pub type Pid = libc::pid_t;
 pub type Uid = libc::uid_t;
@@ -44,7 +43,7 @@ pub fn err_exit(syscall_name: &str) -> ! {
         }
     }
 }
-
+/*
 fn sock_lock(sock: &mut Socket, expected_class: &'static [u8]) -> Result<(), Error> {
     use std::io::Write;
     let mut logger = strace_logger();
@@ -74,7 +73,7 @@ fn sock_wake(sock: &mut Socket, wake_class: &'static [u8]) -> Result<(), Error> 
         Ok(_) => Ok(()),
         Err(_) => Err(Error::Sandbox),
     }
-}
+}*/
 
 pub(crate) trait IpcSocketExt {
     fn lock(&mut self, expected_class: &'static [u8]) -> Result<(), Error>;
@@ -84,42 +83,10 @@ pub(crate) trait IpcSocketExt {
     fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, Error>;
 }
 
-const MAX_MSG_SIZE: usize = 16384;
-
-impl IpcSocketExt for Socket {
-    fn lock(&mut self, expected_class: &'static [u8]) -> Result<(), Error> {
-        sock_lock(self, expected_class)
-    }
-
-    fn wake(&mut self, wake_class: &'static [u8]) -> Result<(), Error> {
-        sock_wake(self, wake_class)
-    }
-
-    fn send<T: serde::ser::Serialize>(&mut self, data: &T) -> Result<(), Error> {
-        let data = serde_json::to_vec(data).unwrap();
-        assert!(data.len() <= MAX_MSG_SIZE);
-        self.send_slice(&data, None)
-            .map(|_num_written| ())
-            .map_err(|_e| Error::Sandbox)
-    }
-
-    fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, Error> {
-        use std::io::Write;
-        let mut logger = StraceLogger::new();
-        let mut buf = vec![0; MAX_MSG_SIZE];
-
-        let num_read = match self.recv_into_slice::<[RawFd; 0]>(&mut buf) {
-            Ok(cnt) => cnt.0,
-            Err(_e) => return Err(Error::Sandbox),
-        };
-        writeln!(logger, "util::recv() got message of {} bytes", num_read).ok();
-        match serde_json::from_slice(&buf[..num_read]) {
-            Ok(x) => Ok(x),
-            Err(e) => {
-                writeln!(logger, "ERROR: deserialization failed: {}", e).ok();
-                Err(Error::Sandbox)
-            }
-        }
+pub fn cvt_error(n: nix::Error) -> std::io::Error {
+    match n {
+        nix::Error::Sys(sys) => std::io::Error::from_raw_os_error(sys as i32),
+        other => std::io::Error::new(std::io::ErrorKind::Other, other),
     }
 }
 
