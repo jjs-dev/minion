@@ -10,5 +10,5 @@ minion = {path = ".."}
 clap = "2.33.3"
 nix = "0.19.1"
 tempfile = "3.2.0"
-tokio = { version = "1.1.0", features = ["macros", "rt"] }
+tokio = { version = "1.2.0", features = ["macros", "rt"] }
 tracing-subscriber = "0.2.15"
