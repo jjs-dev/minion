@@ -51,13 +51,14 @@ impl Zygote<'_, '_> {
         // Now we do some preprocessing.
         let env: Vec<_> = options.environment.clone();
 
-        let mut child_fds = self
-            .options
-            .sock
-            .recv_struct::<u64, [RawFd; 3]>()
-            .unwrap()
-            .1
-            .unwrap();
+        let mut child_fds = unsafe {
+            self.options
+                .sock
+                .recv_struct_raw::<u64, [RawFd; 3]>()
+                .unwrap()
+                .1
+                .unwrap()
+        };
         for f in child_fds.iter_mut() {
             let old = *f;
             let new = nix::unistd::dup(old).unwrap();
