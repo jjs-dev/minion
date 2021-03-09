@@ -50,22 +50,16 @@ pub trait ChildProcess: Send + Sync + 'static {
 
 impl<C: crate::ChildProcess> ChildProcess for C {
     fn stdin(&mut self) -> Option<Box<dyn std::io::Write + Send + Sync + 'static>> {
-        match self.stdin() {
-            Some(s) => Some(Box::new(s)),
-            None => None,
-        }
+        self.stdin()
+            .map(|x| Box::new(x) as Box<dyn std::io::Write + Send + Sync + 'static>)
     }
     fn stdout(&mut self) -> Option<Box<dyn std::io::Read + Send + Sync + 'static>> {
-        match self.stdout() {
-            Some(s) => Some(Box::new(s)),
-            None => None,
-        }
+        self.stdout()
+            .map(|x| Box::new(x) as Box<dyn std::io::Read + Send + Sync + 'static>)
     }
     fn stderr(&mut self) -> Option<Box<dyn std::io::Read + Send + Sync + 'static>> {
-        match self.stderr() {
-            Some(s) => Some(Box::new(s)),
-            None => None,
-        }
+        self.stderr()
+            .map(|x| Box::new(x) as Box<dyn std::io::Read + Send + Sync + 'static>)
     }
     fn wait_for_exit(
         &mut self,

@@ -53,8 +53,8 @@ impl WaitFuture {
         let inner = AsyncFd::new(OwnedFd(fd))?;
         Ok(WaitFuture {
             inner,
-            pid,
             sandbox,
+            pid,
         })
     }
 }
