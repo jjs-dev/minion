@@ -61,7 +61,7 @@ pub(crate) struct ZygoteOptions<'a> {
     jail_options: JailOptions,
     sock: Socket,
     uid_mapping_done: Fd,
-    cgroup_driver: &'a crate::linux::cgroup::Driver,
+    driver: &'a crate::linux::limits::Driver,
 }
 
 struct DoExecArg<'a> {
@@ -70,7 +70,7 @@ struct DoExecArg<'a> {
     environment: &'a [OsString],
     stdio: Stdio,
     pwd: &'a OsStr,
-    join_handle: &'a crate::linux::cgroup::JoinHandle,
+    enter_handle: crate::linux::limits::OpaqueEnterHandle,
     jail_id: &'a str,
 }
 
@@ -148,7 +148,7 @@ fn do_exec(arg: DoExecArg) -> ! {
         // Join cgroups.
         // This doesn't require any additional capablities, because we just write some stuff
         // to preopened handle.
-        arg.join_handle.join_self();
+        arg.enter_handle.join();
 
         // Now we need mark all FDs as CLOEXEC for not to expose them to sandboxed process
         let fd_list;
@@ -239,7 +239,7 @@ fn spawn_job(
         environment: &options.env,
         stdio: options.stdio,
         pwd: &options.pwd,
-        join_handle: &setup_data.cgroup_join_handle,
+        enter_handle: setup_data.resource_group_enter_handle.clone(),
         jail_id: &jail_id,
     };
     let res = unsafe { nix::unistd::fork() }?;
@@ -255,7 +255,7 @@ fn spawn_job(
 
 pub(in crate::linux) fn start_zygote(
     jail_options: JailOptions,
-    cgroup_driver: &crate::linux::cgroup::Driver,
+    driver: &crate::linux::limits::Driver,
 ) -> Result<jail_common::ZygoteStartupInfo, Error> {
     let (client_socket, zyg_sock) = Socket::pair()?;
 
@@ -283,7 +283,7 @@ pub(in crate::linux) fn start_zygote(
                     jail_options,
                     uid_mapping_done_r,
                     zyg_sock,
-                    cgroup_driver,
+                    driver,
                 ),
                 nix::unistd::ForkResult::Parent { child } => {
                     let len = zygote_pid_w
@@ -348,7 +348,7 @@ fn start_zygote_main_process(
     jail_options: JailOptions,
     uid_mapping_done: Fd,
     zyg_sock: Socket,
-    cgroup_driver: &crate::linux::cgroup::Driver,
+    driver: &crate::linux::limits::Driver,
 ) -> ! {
     let mut logger = crate::linux::util::strace_logger();
     write!(
@@ -361,7 +361,7 @@ fn start_zygote_main_process(
         jail_options,
         sock: zyg_sock,
         uid_mapping_done,
-        cgroup_driver,
+        driver,
     };
     let zygote_ret_code = main_loop::entry(zyg_opts);
 

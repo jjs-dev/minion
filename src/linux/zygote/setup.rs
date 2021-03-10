@@ -12,7 +12,7 @@ use nix::sys::signal;
 use std::{ffi::CString, fs, io, io::Write, os::unix::ffi::OsStrExt, path::Path, ptr};
 
 pub(in crate::linux) struct SetupData {
-    pub(in crate::linux) cgroup_join_handle: crate::linux::cgroup::JoinHandle,
+    pub(in crate::linux) resource_group_enter_handle: crate::linux::limits::OpaqueEnterHandle,
 }
 
 fn configure_dir(dir_path: &Path) -> Result<(), Error> {
@@ -188,7 +188,7 @@ fn setup_panic_hook() {
 pub(in crate::linux) fn setup(
     jail_params: &JailOptions,
     uid_mapping_done: &mut Fd,
-    cgroup_driver: &crate::linux::cgroup::Driver,
+    driver: &crate::linux::limits::Driver,
 ) -> Result<SetupData, Error> {
     setup_panic_hook();
     setup_sighandler();
@@ -200,9 +200,9 @@ pub(in crate::linux) fn setup(
     configure_dir(&jail_params.isolation_root)?;
     setup_expositions(&jail_params);
     setup_procfs(&jail_params)?;
-    let cgroup_join_handle = cgroup_driver.create_group(
+    let resource_group_enter_handle = driver.create_group(
         &jail_params.jail_id,
-        &crate::linux::cgroup::ResourceLimits {
+        &crate::linux::limits::ResourceLimits {
             pids_max: jail_params.max_alive_process_count,
             memory_max: jail_params.memory_limit,
         },
@@ -210,6 +210,8 @@ pub(in crate::linux) fn setup(
     setup_chroot(&jail_params)?;
     let mut logger = crate::linux::util::StraceLogger::new();
     writeln!(logger, "sandbox {}: setup done", &jail_params.jail_id).unwrap();
-    let res = SetupData { cgroup_join_handle };
+    let res = SetupData {
+        resource_group_enter_handle,
+    };
     Ok(res)
 }

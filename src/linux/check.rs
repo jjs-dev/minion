@@ -1,6 +1,6 @@
 use std::cmp::{max, min};
 
-use crate::linux::cgroup::Driver;
+use crate::linux::limits::Driver;
 
 /// `crate::check()` on linux
 pub fn check(settings: &crate::linux::Settings, res: &mut crate::check::CheckResult) {

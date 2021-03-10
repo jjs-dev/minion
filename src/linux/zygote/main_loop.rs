@@ -231,7 +231,7 @@ pub(crate) fn entry(mut options: ZygoteOptions<'_>) -> Result<ReturnCode, Error>
     let setup_data = setup::setup(
         &options.jail_options,
         &mut options.uid_mapping_done,
-        options.cgroup_driver,
+        options.driver,
     )?;
     let mut zygote = Zygote {
         options: &mut options,

@@ -1,10 +1,10 @@
-mod cgroup;
 pub mod check;
 pub mod error;
 pub mod ext;
 mod fd;
 mod ipc;
 mod jail_common;
+mod limits;
 mod pipe;
 mod sandbox;
 mod uid_alloc;
@@ -263,7 +263,7 @@ impl Settings {
 #[derive(Debug)]
 pub struct LinuxBackend {
     settings: Settings,
-    cgroup_driver: Arc<cgroup::Driver>,
+    driver: Arc<limits::Driver>,
     // used for allocating sandbox UIDs when we are root
     uid_alloc: Arc<UidAllocator>,
 }
@@ -274,14 +274,12 @@ impl Backend for LinuxBackend {
     type ChildProcess = LinuxChildProcess;
     fn new_sandbox(&self, mut options: SandboxOptions) -> Result<LinuxSandbox, Error> {
         options.postprocess();
-        let sb = unsafe {
-            LinuxSandbox::create(
-                options,
-                &self.settings,
-                self.cgroup_driver.clone(),
-                self.uid_alloc.clone(),
-            )?
-        };
+        let sb = LinuxSandbox::create(
+            options,
+            &self.settings,
+            self.driver.clone(),
+            self.uid_alloc.clone(),
+        )?;
         Ok(sb)
     }
 
@@ -296,11 +294,11 @@ impl Backend for LinuxBackend {
 impl LinuxBackend {
     pub fn new(settings: Settings) -> Result<LinuxBackend, Error> {
         self::check::run_all_feature_checks();
-        let cgroup_driver = Arc::new(cgroup::Driver::new(&settings)?);
+        let driver = Arc::new(limits::Driver::new(&settings)?);
         let uid_alloc = Arc::new(UidAllocator::new(settings.uid.low, settings.uid.high));
         Ok(LinuxBackend {
             settings,
-            cgroup_driver,
+            driver,
             uid_alloc,
         })
     }

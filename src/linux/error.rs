@@ -1,7 +1,8 @@
 use crate::linux::{
-    cgroup::{CgroupDetectionError, CgroupError},
     ipc::IpcError,
+    limits::{DriverError, DriverInitializationError},
 };
+
 #[derive(Eq, PartialEq)]
 pub enum ErrorKind {
     /// This error typically means that isolated process tried to break its sandbox
@@ -29,15 +30,15 @@ pub enum Error {
     },
     #[error("unknown error")]
     Unknown,
-    #[error("Cgroup detection failure")]
-    CgroupDetection {
+    #[error("failed to select esource limit implementation")]
+    SelectDriverImpl {
         #[from]
-        cause: CgroupDetectionError,
+        cause: DriverInitializationError,
     },
-    #[error("Cgroup manipulation failed")]
-    Cgroup {
+    #[error("failed to enable resource limits")]
+    ResourceLimits {
         #[from]
-        cause: CgroupError,
+        cause: DriverError,
     },
     #[error("sandbox ipc error")]
     SandboxIpc {
@@ -60,12 +61,12 @@ impl Error {
             Error::Io { .. } => ErrorKind::System,
             Error::SandboxMisbehavior { .. } => ErrorKind::Sandbox,
             Error::Unknown => ErrorKind::System,
-            Error::Cgroup { .. } => ErrorKind::System,
-            Error::CgroupDetection { .. } => ErrorKind::System,
             Error::SandboxIpc { .. } => ErrorKind::Sandbox,
             Error::InvalidSharedItemFlag { .. } => ErrorKind::System,
             Error::UidExhausted => ErrorKind::System,
             Error::SandboxGone => ErrorKind::System,
+            Error::ResourceLimits { .. } => ErrorKind::System,
+            Error::SelectDriverImpl { .. } => ErrorKind::System,
         }
     }
 
