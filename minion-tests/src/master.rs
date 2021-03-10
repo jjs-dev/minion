@@ -20,15 +20,11 @@ impl Outcome {
 pub fn main(test_cases: &[&'static dyn TestCase]) {
     let matches = clap::App::new("minion-tests")
         .arg(
-            clap::Arg::with_name("test-filter")
+            clap::Arg::new("test-filter")
                 .long("test-filter")
                 .takes_value(true),
         )
-        .arg(
-            clap::Arg::with_name("trace")
-                .long("trace")
-                .takes_value(false),
-        )
+        .arg(clap::Arg::new("trace").long("trace").takes_value(false))
         .get_matches();
     check_static();
 
