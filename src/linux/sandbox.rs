@@ -204,7 +204,9 @@ impl LinuxSandbox {
 
         let fds = [query.stdin, query.stdout, query.stderr];
         let empty: u64 = 0xDEAD_F00D_B17B_00B5;
-        sock.send_struct(&empty, Some(&fds)).ok();
+        unsafe {
+            sock.send_struct_raw(&empty, Some(&fds)).ok();
+        }
         let job_startup_info = sock.recv()?;
         let fd = sock
             .recv_into_buf::<[RawFd; 1]>(1)
