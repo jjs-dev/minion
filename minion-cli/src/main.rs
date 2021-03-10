@@ -1,6 +1,6 @@
+use clap::Clap;
 use minion::{self};
 use std::time::Duration;
-use structopt::StructOpt;
 
 #[derive(Debug)]
 struct EnvItem {
@@ -49,58 +49,58 @@ fn parse_path_exposition_item(src: &str) -> Result<minion::SharedItem, String> {
     })
 }
 
-#[derive(StructOpt, Debug)]
+#[derive(Clap, Debug)]
 struct ExecOpt {
     /// Full name of executable file (e.g. /bin/ls)
-    #[structopt(name = "bin")]
+    #[clap(name = "bin")]
     executable: String,
 
     /// Arguments for isolated process
-    #[structopt(short = "a", long = "arg")]
+    #[clap(short = 'a', long = "arg")]
     argv: Vec<String>,
 
     /// Environment variables (KEY=VAL) which will be passed to isolated process
-    #[structopt(short = "e", long, parse(try_from_str = parse_env_item))]
+    #[clap(short = 'e', long, parse(try_from_str = parse_env_item))]
     env: Vec<EnvItem>,
 
     /// Max peak process count (including main)
-    #[structopt(short = "n", long = "max-process-count", default_value = "16")]
+    #[clap(short = 'n', long = "max-process-count", default_value = "16")]
     num_processes: usize,
 
     /// Max memory available to isolated process
-    #[structopt(short = "m", long, default_value = "256000000")]
+    #[clap(short = 'm', long, default_value = "256000000")]
     memory_limit: usize,
 
     /// Total CPU time in milliseconds
-    #[structopt(short = "t", long, default_value = "1000")]
+    #[clap(short = 't', long, default_value = "1000")]
     time_limit: u32,
 
     /// Print parsed argv
-    #[structopt(long)]
+    #[clap(long)]
     dump_argv: bool,
 
     /// Print libminion parameters
-    #[structopt(long = "dump-generated-security-settings")]
+    #[clap(long = "dump-generated-security-settings")]
     dump_minion_params: bool,
 
     /// Skip system check
-    #[structopt(long)]
+    #[clap(long)]
     skip_system_check: bool,
 
     /// Isolation root
-    #[structopt(short = "r", long = "root")]
+    #[clap(short = 'r', long = "root")]
     isolation_root: String,
 
     /// Exposed paths (/source/path:MASK:/dest/path), MASK is r-x for readonly access and rwx for full access
-    #[structopt(
-        short = "x",
+    #[clap(
+        short = 'x',
         long = "expose",
         parse(try_from_str = parse_path_exposition_item)
     )]
     exposed_paths: Vec<minion::SharedItem>,
 
     /// Process working dir, relative to `isolation_root`
-    #[structopt(short = "p", long = "pwd", default_value = "/")]
+    #[clap(short = 'p', long = "pwd", default_value = "/")]
     pwd: String,
 }
 
@@ -109,7 +109,7 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
-    let options: ExecOpt = ExecOpt::from_args();
+    let options: ExecOpt = Clap::parse();
     if options.dump_argv {
         println!("{:#?}", options);
     }
