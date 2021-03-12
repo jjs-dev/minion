@@ -1,4 +1,3 @@
-#![cfg_attr(minion_nightly, feature(unsafe_block_in_unsafe_fn))]
 #![cfg_attr(minion_nightly, warn(unsafe_op_in_unsafe_fn))]
 use minion::{self};
 use std::{

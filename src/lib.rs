@@ -5,7 +5,6 @@
  * _warning_: not all features are supported by all backends. See documentation for particular backend
  * to know more
  */
-#![cfg_attr(minion_nightly, feature(unsafe_block_in_unsafe_fn))]
 #![cfg_attr(minion_nightly, warn(unsafe_op_in_unsafe_fn))]
 mod command;
 
