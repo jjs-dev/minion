@@ -35,7 +35,7 @@ end
 EOF
   top -l 1
   cat Vagrantfile
-  sudo vagrant up
+  sudo vagrant up || sudo vagrant up || sudo vagrant up
   echo "::group::Installing packages"
   sudo vagrant ssh --command "sudo dnf install -y strace zip"
   echo "::group::Entering VM"
