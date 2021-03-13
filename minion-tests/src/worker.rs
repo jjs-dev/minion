@@ -1,6 +1,7 @@
 //! Worker source code
 use crate::TestCase;
-// worker entry point
+use minion::{Backend as _, ChildProcess as _};
+use std::sync::Arc;
 
 // 16 mibibytes
 const MEMORY_LIMIT_IN_BYTES: u64 = 4 * (1 << 20);
@@ -13,8 +14,27 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
         .find(|&tc| tc.name() == test_case_name)
         .unwrap();
 
+    let resource_driver = {
+        let name = std::env::var("DRIVER").unwrap();
+        match name.as_str() {
+            "cgroup-v1" => minion::linux::ResourceDriverKind::CgroupV1,
+            "cgroup-v2" => minion::linux::ResourceDriverKind::CgroupV2,
+            "prlimit" => minion::linux::ResourceDriverKind::Prlimit,
+            _ => unreachable!(),
+        }
+    };
+
     let tempdir = tempfile::TempDir::new().expect("cannot create temporary dir");
-    let backend = minion::erased::setup().expect("backend creation failed");
+    let mut settings = minion::linux::Settings::new();
+    settings.resource_drivers = vec![resource_driver];
+    {
+        let mut res = minion::CheckResult::new();
+        minion::linux::check::check(&settings, &mut res);
+        if res.has_errors() || res.has_warnings() {
+            panic!("Settings validation failed: {}", res);
+        }
+    }
+    let backend = minion::linux::LinuxBackend::new(settings).expect("backend creation failed");
     let opts = minion::SandboxOptions {
         cpu_time_limit: test_case.time_limit(),
         real_time_limit: test_case.real_time_limit(),
@@ -30,6 +50,7 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
         }],
     };
     let sandbox = backend.new_sandbox(opts).expect("can not create sandbox");
+    let sandbox = Arc::new(sandbox);
     let opts = minion::ChildProcessOptions {
         path: "/me".into(),
         arguments: vec![test_case.name().into()],
@@ -58,6 +79,7 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
     );
 }
 
+// worker entry point
 pub fn main(test_cases: &[&'static dyn TestCase]) {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

@@ -209,27 +209,65 @@ impl Default for UserIdBounds {
 }
 
 /// Allows some customization
-#[non_exhaustive]
 #[derive(Debug, Clone)]
-pub struct Settings {
+#[non_exhaustive]
+pub struct CgroupSettings {
     /// All created cgroups will be children of specified group
     /// Default value is "/minion"
-    pub cgroup_prefix: PathBuf,
+    pub name_prefix: PathBuf,
 
     /// Overrides path to cgroupfs mount.
     /// This can be both cgroupfs v1 and cgroupfs v2.
     /// Additionally fallback (`/sys/fs/cgroup`) can be overrided
     /// at runtime using `MINION_CGROUPFS` environment variable.
-    pub cgroupfs: PathBuf,
+    pub mount: PathBuf,
+}
 
+impl Default for CgroupSettings {
+    fn default() -> Self {
+        CgroupSettings {
+            name_prefix: "/minion".into(),
+            mount: std::env::var_os("MINION_CGROUPFS")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/sys/fs/cgroup")),
+        }
+    }
+}
+
+/// Resource limiting implementation
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub enum ResourceDriverKind {
+    /// Legacy cgroups
+    CgroupV1,
+    /// Unified cgroups
+    CgroupV2,
+    /// Auto-detected cgroups
+    CgroupAuto,
+    /// Use per-process limits (prlimit)
+    /// This is the only option that does not require write access
+    /// to cgroupfs.
+    /// # Caveats
+    /// [TODO]
+    Prlimit,
+    /// Auto-detect
+    Auto { allow_dangerous: bool },
+}
+
+/// Allows some customization
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub struct Settings {
     /// If enabled, minion will ignore clone(MOUNT_NEWNS) error.
     /// This flag has to be enabled for gVisor support.
     pub allow_unsupported_mount_namespace: bool,
-
+    /// Cgroup settings
+    pub cgroup: CgroupSettings,
+    /// Resource limits drivers to use
+    pub resource_drivers: Vec<ResourceDriverKind>,
     /// Do not perform actions that require root access.
     /// Note that some other options may require root as well.
     pub rootless: bool,
-
     /// User identifiers to use for the sandboxes.
     /// Ignored in rootless mode (because calling process uid will be used
     /// instead). Also applies to GIDs
@@ -239,11 +277,11 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            cgroup_prefix: "/minion".into(),
             allow_unsupported_mount_namespace: false,
-            cgroupfs: std::env::var_os("MINION_CGROUPFS")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/sys/fs/cgroup")),
+            cgroup: CgroupSettings::default(),
+            resource_drivers: vec![ResourceDriverKind::Auto {
+                allow_dangerous: false,
+            }],
             rootless: !nix::unistd::Uid::effective().is_root(),
             uid: Default::default(),
         }

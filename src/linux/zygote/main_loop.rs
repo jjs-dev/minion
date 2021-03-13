@@ -1,8 +1,8 @@
 use crate::linux::{
     fd::Fd,
-    jail_common::{JobQuery, Query},
+    jail_common::{JobQuery, Query, ResourceUsageInformation},
     util::{Pid, StraceLogger},
-    zygote::{setup, spawn_job, JobOptions, SetupData, Stdio, ZygoteOptions},
+    zygote::{setup, spawn_job, JobOptions, Stdio, ZygoteOptions},
     Error,
 };
 use nix::sys::{
@@ -11,7 +11,7 @@ use nix::sys::{
     signalfd::SfdFlags,
     wait::{WaitPidFlag, WaitStatus},
 };
-use std::io::Write;
+use std::{io::Write, mem::MaybeUninit};
 
 pub(crate) struct ReturnCode(i32);
 
@@ -39,7 +39,7 @@ struct Task {
 pub(crate) struct Zygote<'a, 'b> {
     tasks: Vec<Task>,
     options: &'a mut ZygoteOptions<'b>,
-    setup_data: &'a SetupData,
+    resource_group_enter_handle: crate::linux::limits::OpaqueEnterHandle,
 }
 impl Zygote<'_, '_> {
     fn process_spawn_query(&mut self, options: &JobQuery) {
@@ -74,8 +74,8 @@ impl Zygote<'_, '_> {
         writeln!(logger, "JobOptions are fetched").ok();
         let startup_info = spawn_job(
             job_options,
-            self.setup_data,
             self.options.jail_options.jail_id.clone(),
+            self.resource_group_enter_handle.clone(),
         )
         .expect("failed to create child");
         writeln!(logger, "Job started, storing Task.").ok();
@@ -175,6 +175,24 @@ impl Zygote<'_, '_> {
         Ok(())
     }
 
+    fn process_resource_usage_query(&mut self) -> Result<(), Error> {
+        unsafe {
+            let mut usage = MaybeUninit::uninit();
+            if libc::getrusage(libc::RUSAGE_CHILDREN, usage.as_mut_ptr()) == -1 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+            let usage = usage.assume_init();
+
+            let resp = ResourceUsageInformation {
+                // NOT total usage, but max usage
+                memory: usage.ru_maxrss as u64,
+                cpu: parse_timeval(usage.ru_utime) + parse_timeval(usage.ru_stime),
+            };
+            self.options.sock.send(&resp)?;
+            Ok(())
+        }
+    }
+
     fn handle_one_request(&mut self) -> Result<Option<ReturnCode>, Error> {
         let mut logger = StraceLogger::new();
         let query: Query = match self.options.sock.recv() {
@@ -190,6 +208,7 @@ impl Zygote<'_, '_> {
         match query {
             Query::Spawn(ref opts) => self.process_spawn_query(opts),
             Query::GetExitCode(query) => self.process_get_exit_code_query(query.pid)?,
+            Query::GetResourceUsage => self.process_resource_usage_query()?,
         };
         Ok(None)
     }
@@ -228,19 +247,20 @@ impl Zygote<'_, '_> {
 }
 
 pub(crate) fn entry(mut options: ZygoteOptions<'_>) -> Result<ReturnCode, Error> {
-    let setup_data = setup::setup(
-        &options.jail_options,
-        &mut options.uid_mapping_done,
-        options.driver,
-    )?;
+    setup::setup(&options.jail_options, &mut options.uid_mapping_done)?;
+    let resource_group_enter_handle = options.resource_group_enter_handle.clone();
     let mut zygote = Zygote {
         options: &mut options,
         tasks: Vec::new(),
-        setup_data: &setup_data,
+        resource_group_enter_handle,
     };
     if crate::linux::check::pidfd_supported() {
         zygote.run_loop_pidfd()
     } else {
         zygote.run_loop_legacy()
     }
+}
+
+fn parse_timeval(tv: libc::timeval) -> u64 {
+    (tv.tv_usec + tv.tv_sec * 1_000_000_000) as u64
 }

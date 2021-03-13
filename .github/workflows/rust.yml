@@ -70,9 +70,10 @@ jobs:
           - "macos-latest"
         rust-target:
           - "x86_64-unknown-linux-musl"
-        cgroups:
+        driver:
           - "cgroup-v1"
           - "cgroup-v2"
+          - "prlimit"
     runs-on: ${{ matrix.os }}
     needs:
       - tests-linux-build
@@ -85,10 +86,10 @@ jobs:
       - name: Test
         run: |
           bash ci/linux.sh
-        timeout-minutes: 10
+        timeout-minutes: 5
         env:
           CI_TARGET: ${{ matrix.rust-target }}
-          CI_CGROUPS: ${{ matrix.cgroups }}
+          CI_DRIVER: ${{ matrix.driver }}
           CI_OS: ${{ matrix.os }}
       - name: Collect logs
         if: always()
@@ -99,7 +100,7 @@ jobs:
         if: always()
         with:
           path: /tmp/logs
-          name: tests-trace-${{ matrix.cgroups }}-${{ matrix.os }}
+          name: tests-trace-${{ matrix.driver }}-${{ matrix.os }}
 
   nightly-checks:
     runs-on: ubuntu-20.04

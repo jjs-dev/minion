@@ -20,6 +20,7 @@ pub(crate) struct JailOptions {
     pub(crate) jail_id: String,
     pub(crate) allow_mount_ns_failure: bool,
     pub(crate) sandbox_uid: u32,
+    pub(crate) enable_watchdog: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -63,6 +64,12 @@ pub(crate) struct GetExitCodeQuery {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ResourceUsageInformation {
+    pub(crate) memory: u64,
+    pub(crate) cpu: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct JobStartupInfo {
     pub(crate) pid: Pid,
 }
@@ -77,4 +84,30 @@ pub(crate) struct ZygoteStartupInfo {
 pub(crate) enum Query {
     Spawn(JobQuery),
     GetExitCode(GetExitCodeQuery),
+    GetResourceUsage,
+}
+
+#[derive(Debug)]
+pub(in crate::linux) struct ZygoteInfo {
+    pub(in crate::linux) sock: Socket,
+    pub(in crate::linux) pid: Pid,
+}
+
+impl Drop for ZygoteInfo {
+    fn drop(&mut self) {
+        // We will kill zygote, and
+        // kernel will kill all other processes by itself.
+        send_term_signals(self.pid);
+    }
+}
+
+fn send_term_signals(target_pid: Pid) {
+    // TODO: maybe SIGKILL is enough?
+    for &sig in &[
+        nix::sys::signal::SIGKILL,
+        nix::sys::signal::SIGTERM,
+        nix::sys::signal::SIGABRT,
+    ] {
+        nix::sys::signal::kill(nix::unistd::Pid::from_raw(target_pid), sig).ok();
+    }
 }

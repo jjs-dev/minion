@@ -25,6 +25,13 @@ pub fn main(test_cases: &[&'static dyn TestCase]) {
                 .takes_value(true),
         )
         .arg(clap::Arg::new("trace").long("trace").takes_value(false))
+        .arg(
+            clap::Arg::new("resource-driver")
+                .long("resource-driver")
+                .possible_values(&["cgroup-v1", "cgroup-v2", "prlimit"])
+                .required(true)
+                .takes_value(true),
+        )
         .get_matches();
     check_static();
 
@@ -36,6 +43,7 @@ pub fn main(test_cases: &[&'static dyn TestCase]) {
         .collect();
     let opts = ExecuteOptions {
         trace: matches.is_present("trace"),
+        driver: matches.value_of("resource-driver").unwrap().to_string(),
     };
     let outcome = execute_tests(&filtered_test_cases, opts);
     println!("------ execution done ------");
@@ -48,9 +56,10 @@ pub fn main(test_cases: &[&'static dyn TestCase]) {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 struct ExecuteOptions {
     trace: bool,
+    driver: String,
 }
 
 fn execute_tests(test_cases: &[&dyn TestCase], exec_opts: ExecuteOptions) -> Outcome {
@@ -61,12 +70,12 @@ fn execute_tests(test_cases: &[&dyn TestCase], exec_opts: ExecuteOptions) -> Out
     println!("({} tests)", test_cases.len());
     let mut outcome = Outcome::Success;
     for &case in test_cases {
-        outcome = outcome.and(execute_single_test(case, exec_opts));
+        outcome = outcome.and(execute_single_test(case, &exec_opts));
     }
     outcome
 }
 
-fn execute_single_test(case: &dyn TestCase, exec_opts: ExecuteOptions) -> Outcome {
+fn execute_single_test(case: &dyn TestCase, exec_opts: &ExecuteOptions) -> Outcome {
     println!("------ {} ------", case.name());
     let self_exe = std::env::current_exe().unwrap();
     let mut cmd = if exec_opts.trace {
@@ -81,6 +90,7 @@ fn execute_single_test(case: &dyn TestCase, exec_opts: ExecuteOptions) -> Outcom
     };
 
     cmd.env_clear();
+    cmd.env("DRIVER", &exec_opts.driver);
     cmd.env(crate::WORKER_ENV_NAME, "1");
     cmd.env("TEST", case.name());
     cmd.env("RUST_BACKTRACE", "full");

@@ -4,8 +4,8 @@ use self::watchdog::{watchdog, Event};
 use crate::{
     linux::{
         fd::Fd,
-        ipc::Socket,
-        jail_common::{self, LinuxSharedItem, SharedItemFlags},
+        jail_common::{self, LinuxSharedItem, SharedItemFlags, ZygoteInfo},
+        limits::ResourceLimits,
         uid_alloc::UidAllocator,
         util::Pid,
         zygote, Error,
@@ -43,20 +43,6 @@ impl SandboxState {
             }
             Event::Heartbeat => {}
         }
-    }
-}
-
-#[derive(Debug)]
-struct ZygoteInfo {
-    sock: Socket,
-    pid: Pid,
-}
-
-impl Drop for ZygoteInfo {
-    fn drop(&mut self) {
-        // We will kill zygote, and
-        // kernel will kill all other processes by itself.
-        send_term_signals(self.pid);
     }
 }
 
@@ -182,17 +168,35 @@ impl LinuxSandbox {
             jail_id: jail_id.clone(),
             allow_mount_ns_failure: settings.allow_unsupported_mount_namespace,
             sandbox_uid,
+            enable_watchdog: driver.get_watchdog(),
         };
-        let startup_info = zygote::start_zygote(jail_options, &driver)?;
+
+        let resource_group_enter_handle = driver.create_group(
+            &jail_options.jail_id,
+            &ResourceLimits {
+                pids_max: jail_options.max_alive_process_count,
+                memory_max: jail_options.memory_limit,
+                cpu_usage: jail_options
+                    .cpu_time_limit
+                    .as_nanos()
+                    .try_into()
+                    .expect("too big CPU time limit"),
+            },
+        )?;
+
+        let startup_info = zygote::start_zygote(jail_options, &resource_group_enter_handle)?;
+
+        let zygote = Arc::new(Mutex::new(Some(ZygoteInfo {
+            sock: startup_info.socket,
+            pid: startup_info.zygote_pid,
+        })));
+        driver.register_group_details(&jail_id, zygote.clone());
 
         let (watchdog_tx, watchdog_rx) = crossbeam_channel::unbounded();
         let sandbox = LinuxSandbox {
             id: jail_id.clone(),
             options: options.clone(),
-            zygote: Arc::new(Mutex::new(Some(ZygoteInfo {
-                sock: startup_info.socket,
-                pid: startup_info.zygote_pid,
-            }))),
+            zygote,
             state: SandboxState {
                 was_cpu_tle: AtomicBool::new(false),
                 was_wall_tle: AtomicBool::new(false),
@@ -248,10 +252,10 @@ impl LinuxSandbox {
             zyg.sock.send(&q).ok();
             match zyg.sock.recv::<i64>() {
                 Ok(ec) => ExitCode(ec),
-                Err(_) => crate::ExitCode::KILLED,
+                Err(_) => ExitCode::KILLED,
             }
         })
-        .unwrap_or(crate::ExitCode::KILLED)
+        .unwrap_or(ExitCode::KILLED)
     }
 }
 
@@ -273,16 +277,5 @@ impl Drop for LinuxSandbox {
                 tracing::error!("failed to delete cgroup: {:#}", e);
             }
         }
-    }
-}
-
-fn send_term_signals(target_pid: Pid) {
-    // TODO: maybe SIGKILL is enough?
-    for &sig in &[
-        nix::sys::signal::SIGKILL,
-        nix::sys::signal::SIGTERM,
-        nix::sys::signal::SIGABRT,
-    ] {
-        nix::sys::signal::kill(nix::unistd::Pid::from_raw(target_pid), sig).ok();
     }
 }

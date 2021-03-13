@@ -41,10 +41,17 @@ fn assert_contains(r: &mut dyn Read, expected: &[u8]) {
 }
 
 fn assert_killed(cp: crate::CompletedChild) {
-    assert_exit_code(cp, minion::ExitCode::KILLED);
+    assert_exit_code_in(
+        cp,
+        &[minion::ExitCode::KILLED, minion::ExitCode::linux_signal(9)],
+    );
 }
 
 fn assert_exit_code(cp: crate::CompletedChild, exp_exit_code: minion::ExitCode) {
+    assert_exit_code_in(cp, &[exp_exit_code])
+}
+
+fn assert_exit_code_in(cp: crate::CompletedChild, exp_exit_codes: &[minion::ExitCode]) {
     let act_exit_code = cp.exit_code;
-    assert_eq!(act_exit_code, exp_exit_code);
+    assert!(exp_exit_codes.contains(&act_exit_code));
 }

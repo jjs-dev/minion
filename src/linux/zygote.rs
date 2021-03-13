@@ -9,7 +9,7 @@ mod setup;
 use crate::linux::{
     fd::Fd,
     ipc::Socket,
-    jail_common::{self, JailOptions},
+    jail_common::{self, JailOptions, ZygoteStartupInfo},
     util::{duplicate_string, err_exit, Uid},
     Error,
 };
@@ -23,9 +23,6 @@ use std::{
     path::PathBuf,
     ptr,
 };
-
-use jail_common::ZygoteStartupInfo;
-use setup::SetupData;
 
 const SANDBOX_INTERNAL_UID: Uid = 179;
 
@@ -61,7 +58,7 @@ pub(crate) struct ZygoteOptions<'a> {
     jail_options: JailOptions,
     sock: Socket,
     uid_mapping_done: Fd,
-    driver: &'a crate::linux::limits::Driver,
+    resource_group_enter_handle: &'a crate::linux::limits::OpaqueEnterHandle,
 }
 
 struct DoExecArg<'a> {
@@ -229,8 +226,8 @@ fn do_exec(arg: DoExecArg) -> ! {
 
 fn spawn_job(
     options: JobOptions,
-    setup_data: &SetupData,
     jail_id: String,
+    resource_group_enter_handle: crate::linux::limits::OpaqueEnterHandle,
 ) -> Result<jail_common::JobStartupInfo, Error> {
     // `dea` will be passed to child process
     let dea = DoExecArg {
@@ -239,7 +236,7 @@ fn spawn_job(
         environment: &options.env,
         stdio: options.stdio,
         pwd: &options.pwd,
-        enter_handle: setup_data.resource_group_enter_handle.clone(),
+        enter_handle: resource_group_enter_handle,
         jail_id: &jail_id,
     };
     let res = unsafe { nix::unistd::fork() }?;
@@ -255,7 +252,7 @@ fn spawn_job(
 
 pub(in crate::linux) fn start_zygote(
     jail_options: JailOptions,
-    driver: &crate::linux::limits::Driver,
+    resource_group_enter_handle: &crate::linux::limits::OpaqueEnterHandle,
 ) -> Result<jail_common::ZygoteStartupInfo, Error> {
     let (client_socket, zyg_sock) = Socket::pair()?;
 
@@ -283,7 +280,7 @@ pub(in crate::linux) fn start_zygote(
                     jail_options,
                     uid_mapping_done_r,
                     zyg_sock,
-                    driver,
+                    resource_group_enter_handle,
                 ),
                 nix::unistd::ForkResult::Parent { child } => {
                     let len = zygote_pid_w
@@ -348,7 +345,7 @@ fn start_zygote_main_process(
     jail_options: JailOptions,
     uid_mapping_done: Fd,
     zyg_sock: Socket,
-    driver: &crate::linux::limits::Driver,
+    resource_group_enter_handle: &crate::linux::limits::OpaqueEnterHandle,
 ) -> ! {
     let mut logger = crate::linux::util::strace_logger();
     write!(
@@ -361,7 +358,7 @@ fn start_zygote_main_process(
         jail_options,
         sock: zyg_sock,
         uid_mapping_done,
-        driver,
+        resource_group_enter_handle,
     };
     let zygote_ret_code = main_loop::entry(zyg_opts);
 

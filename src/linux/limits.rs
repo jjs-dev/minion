@@ -2,11 +2,13 @@
 mod cgroup_common;
 mod cgroup_v1;
 mod cgroup_v2;
+mod prlimit;
 
-use self::cgroup_common::CgroupEnter;
-use crate::linux::{Error, Settings};
+use self::{cgroup_common::CgroupEnter, prlimit::PrlimitEnter};
+use crate::linux::{jail_common::ZygoteInfo, Error, ResourceDriverKind, Settings};
+use parking_lot::Mutex;
 use rand::Rng;
-use std::{fmt, path::PathBuf};
+use std::{collections::HashMap, fmt, path::PathBuf, sync::Arc};
 
 /// See ResourceUsageData for docs.
 #[derive(Debug, Copy, Clone, Default)]
@@ -17,9 +19,11 @@ pub(in crate::linux) struct InternalResourceUsageData {
 }
 
 /// Represents resource limits imposed on sandbox
+#[derive(Clone)]
 pub(in crate::linux) struct ResourceLimits {
     pub(in crate::linux) pids_max: u32,
     pub(in crate::linux) memory_max: u64,
+    pub(in crate::linux) cpu_usage: u64,
 }
 
 trait ResourceLimitImpl {
@@ -34,6 +38,8 @@ trait ResourceLimitImpl {
         group_id: &str,
         limits: &ResourceLimits,
     ) -> Result<Self::Enter, Self::Error>;
+
+    fn register_group_details(&self, _group_id: &str, _zygote: Arc<Mutex<Option<ZygoteInfo>>>) {}
 
     fn delete_group(&self, group_id: &str) -> Result<(), Self::Error>;
 
@@ -60,6 +66,7 @@ fn smoke_check<R: ResourceLimitImpl>(imp: &R) -> Result<(), Error> {
             &ResourceLimits {
                 memory_max: 1 << 30,
                 pids_max: 1024,
+                cpu_usage: 1_000_000_000,
             },
         )
         .map_err(Into::into)?;
@@ -72,11 +79,14 @@ fn smoke_check<R: ResourceLimitImpl>(imp: &R) -> Result<(), Error> {
 pub enum DriverError {
     #[error("cgroup manipulation failed")]
     Cgroup(#[from] cgroup_common::CgroupError),
+    #[error("prlimit-based impl failed")]
+    Prlimit(#[from] prlimit::PrlimitError),
 }
 
 #[derive(Clone)]
 enum OpaqueEnterHandleInner {
     Cgroup(CgroupEnter),
+    Prlimit(PrlimitEnter),
 }
 
 #[derive(Clone)]
@@ -88,10 +98,17 @@ impl From<CgroupEnter> for OpaqueEnterHandle {
     }
 }
 
+impl From<PrlimitEnter> for OpaqueEnterHandle {
+    fn from(inner: PrlimitEnter) -> Self {
+        OpaqueEnterHandle(OpaqueEnterHandleInner::Prlimit(inner))
+    }
+}
+
 impl OpaqueEnterHandle {
     pub(in crate::linux) fn join(self) {
         let res = match self.0 {
             OpaqueEnterHandleInner::Cgroup(inner) => inner.join(),
+            OpaqueEnterHandleInner::Prlimit(inner) => inner.join(),
         };
 
         if let Err(e) = res {
@@ -137,17 +154,51 @@ enum RawSettings {
         mount: PathBuf,
         version: CgroupVersion,
     },
+    Prlimit {
+        allow_many_pids: bool,
+    },
 }
 
 #[derive(Debug)]
 enum Inner {
     CgroupV1(cgroup_v1::CgroupV1),
     CgroupV2(cgroup_v2::CgroupV2),
+    Prlimit(prlimit::Prlimit),
 }
 
 #[derive(Debug)]
 pub(in crate::linux) struct Driver {
     inner: Inner,
+}
+
+fn process_driver_kind(settings: &Settings, out: &mut Vec<RawSettings>, kind: &ResourceDriverKind) {
+    match kind {
+        ResourceDriverKind::CgroupV1 => {
+            out.push(RawSettings::Cgroup {
+                prefix: settings.cgroup.name_prefix.clone(),
+                mount: settings.cgroup.mount.clone(),
+                version: CgroupVersion::V1,
+            });
+        }
+        ResourceDriverKind::CgroupV2 => out.push(RawSettings::Cgroup {
+            prefix: settings.cgroup.name_prefix.clone(),
+            mount: settings.cgroup.mount.clone(),
+            version: CgroupVersion::V2,
+        }),
+        ResourceDriverKind::CgroupAuto => {
+            process_driver_kind(settings, out, &ResourceDriverKind::CgroupV1);
+            process_driver_kind(settings, out, &ResourceDriverKind::CgroupV2);
+        }
+        ResourceDriverKind::Prlimit => out.push(RawSettings::Prlimit {
+            allow_many_pids: !settings.rootless,
+        }),
+        ResourceDriverKind::Auto { allow_dangerous } => {
+            process_driver_kind(settings, out, &ResourceDriverKind::CgroupAuto);
+            if *allow_dangerous {
+                process_driver_kind(settings, out, &ResourceDriverKind::Prlimit);
+            }
+        }
+    }
 }
 
 impl Driver {
@@ -176,6 +227,10 @@ impl Driver {
                     }),
                 }
             }
+            RawSettings::Prlimit { allow_many_pids } => Inner::Prlimit(prlimit::Prlimit {
+                groups: Mutex::new(HashMap::new()),
+                allow_multiple_processes: *allow_many_pids,
+            }),
         };
         Driver { inner }
     }
@@ -184,17 +239,14 @@ impl Driver {
         match &self.inner {
             Inner::CgroupV1(inner) => smoke_check(inner),
             Inner::CgroupV2(inner) => smoke_check(inner),
+            Inner::Prlimit(inner) => smoke_check(inner),
         }
     }
 
     pub fn new(settings: &Settings) -> Result<Self, Error> {
         let mut configs = Vec::new();
-        for &cgroup_version in &[CgroupVersion::V1, CgroupVersion::V2] {
-            configs.push(RawSettings::Cgroup {
-                prefix: settings.cgroup_prefix.clone(),
-                mount: settings.cgroupfs.clone(),
-                version: cgroup_version,
-            });
+        for driver_kind in &settings.resource_drivers {
+            process_driver_kind(settings, &mut configs, driver_kind)
         }
 
         let mut err = DriverInitializationError {
@@ -224,6 +276,7 @@ impl Driver {
         let handle = match &self.inner {
             Inner::CgroupV1(inner) => inner.create_group(group_id, limits)?.into(),
             Inner::CgroupV2(inner) => inner.create_group(group_id, limits)?.into(),
+            Inner::Prlimit(inner) => inner.create_group(group_id, limits)?.into(),
         };
         Ok(handle)
     }
@@ -232,6 +285,7 @@ impl Driver {
         let res = match &self.inner {
             Inner::CgroupV1(inner) => inner.resource_usage(group_id)?,
             Inner::CgroupV2(inner) => inner.resource_usage(group_id)?,
+            Inner::Prlimit(inner) => inner.resource_usage(group_id)?,
         };
         Ok(res)
     }
@@ -240,7 +294,24 @@ impl Driver {
         match &self.inner {
             Inner::CgroupV1(inner) => inner.delete_group(group_id)?,
             Inner::CgroupV2(inner) => inner.delete_group(group_id)?,
+            Inner::Prlimit(inner) => inner.delete_group(group_id)?,
         };
         Ok(())
+    }
+
+    pub fn register_group_details(&self, group_id: &str, zygote: Arc<Mutex<Option<ZygoteInfo>>>) {
+        match &self.inner {
+            Inner::CgroupV1(inner) => inner.register_group_details(group_id, zygote),
+            Inner::CgroupV2(inner) => inner.register_group_details(group_id, zygote),
+            Inner::Prlimit(inner) => inner.register_group_details(group_id, zygote),
+        }
+    }
+
+    pub fn get_watchdog(&self) -> bool {
+        match &self.inner {
+            Inner::CgroupV1(_) => true,
+            Inner::CgroupV2(_) => true,
+            Inner::Prlimit(_) => false,
+        }
     }
 }
