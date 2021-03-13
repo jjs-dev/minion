@@ -127,11 +127,10 @@ impl crate::TestCase for TOom {
         }
     }
 
-    fn check(&self, _cp: crate::CompletedChild, _sb: &dyn Sandbox) {
-        // TODO this test is broken
-        // super::assert_exit_code(cp, -9);
-        // assert!(!d.check_cpu_tle().unwrap());
-        // assert!(!d.check_real_tle().unwrap());
+    fn check(&self, cp: crate::CompletedChild, sb: &dyn Sandbox) {
+        super::assert_exit_code(cp, minion::ExitCode::linux_signal(9));
+        assert!(!sb.check_cpu_tle().unwrap());
+        assert!(!sb.check_real_tle().unwrap());
     }
     fn real_time_limit(&self) -> std::time::Duration {
         std::time::Duration::from_secs(20)
