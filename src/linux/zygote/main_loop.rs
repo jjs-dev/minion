@@ -1,6 +1,7 @@
 use crate::linux::{
+    fd::Fd,
     jail_common::{JobQuery, Query},
-    util::{IpcSocketExt, Pid, StraceLogger},
+    util::{Pid, StraceLogger},
     zygote::{setup, spawn_job, JobOptions, SetupData, Stdio, ZygoteOptions},
     Error,
 };
@@ -10,10 +11,7 @@ use nix::sys::{
     signalfd::SfdFlags,
     wait::{WaitPidFlag, WaitStatus},
 };
-use std::{
-    io::Write,
-    os::unix::io::{AsRawFd, RawFd},
-};
+use std::io::Write;
 
 pub(crate) struct ReturnCode(i32);
 
@@ -34,7 +32,7 @@ struct Task {
     /// Writable file descriptor. When task finishes
     /// we write something to this file.
     /// In pidfd mode equals to None.
-    notify: Option<RawFd>,
+    notify: Option<Fd>,
     /// Exit code, if child has finished.
     exit_code: Option<i32>,
 }
@@ -45,25 +43,24 @@ pub(crate) struct Zygote<'a, 'b> {
     setup_data: &'a SetupData,
 }
 impl Zygote<'_, '_> {
-    fn process_spawn_query(&mut self, options: &JobQuery) -> Result<(), Error> {
+    fn process_spawn_query(&mut self, options: &JobQuery) {
         let mut logger = StraceLogger::new();
         writeln!(logger, "got Spawn request").ok();
         // Now we do some preprocessing.
         let env: Vec<_> = options.environment.clone();
 
-        let mut child_fds = unsafe {
-            self.options
-                .sock
-                .recv_struct_raw::<u64, [RawFd; 3]>()
-                .unwrap()
-                .1
-                .unwrap()
+        let child_fds = self.options.sock.recv_fds(3).unwrap();
+        let mut child_fds = {
+            let mut it = child_fds.into_iter();
+            let a = it.next().unwrap();
+            let b = it.next().unwrap();
+            let c = it.next().unwrap();
+            [a, b, c]
         };
         for f in child_fds.iter_mut() {
-            let old = *f;
-            let new = nix::unistd::dup(old).unwrap();
-            nix::unistd::close(old).unwrap();
-            *f = new;
+            *f = f
+                .duplicate_with_inheritance()
+                .expect("failed to duplicate child stdio fd");
         }
         let child_stdio = Stdio::from_fd_array(child_fds);
 
@@ -80,17 +77,21 @@ impl Zygote<'_, '_> {
             job_options,
             self.setup_data,
             self.options.jail_options.jail_id.clone(),
-        )?;
+        )
+        .expect("failed to create child");
         writeln!(logger, "Job started, storing Task.").ok();
         let (notify, event) = if crate::linux::check::pidfd_supported() {
             (
                 None,
-                crate::linux::util::pidfd_open(startup_info.pid).unwrap(),
+                Fd::new(
+                    crate::linux::util::pidfd_open(startup_info.pid).expect("failed to open pidfd"),
+                ),
             )
         } else {
-            let (pipe_r, pipe_w) = nix::unistd::pipe2(nix::fcntl::OFlag::O_CLOEXEC).unwrap();
+            let (pipe_r, pipe_w) =
+                nix::unistd::pipe2(nix::fcntl::OFlag::O_CLOEXEC).expect("failed to create a pipe");
 
-            (Some(pipe_w), pipe_r)
+            (Some(Fd::new(pipe_w)), Fd::new(pipe_r))
         };
 
         self.tasks.push(Task {
@@ -99,10 +100,14 @@ impl Zygote<'_, '_> {
             notify,
         });
         writeln!(logger, "Sending startup_info back.").ok();
-        self.options.sock.send(&startup_info)?;
-        self.options.sock.send_slice(b"0", Some(&[event])).unwrap();
-
-        Ok(())
+        self.options
+            .sock
+            .send(&startup_info)
+            .expect("failed to send startup info");
+        self.options
+            .sock
+            .send_fds(&[event])
+            .expect("failed to send notification fd");
     }
 
     fn process_get_exit_code_query(&mut self, pid: Pid) -> Result<(), Error> {
@@ -140,8 +145,8 @@ impl Zygote<'_, '_> {
                     .for_each(|task| {
                         let prev = task.exit_code.replace(exit_code);
                         assert!(prev.is_none());
-                        if let Some(notify) = task.notify {
-                            nix::unistd::write(notify, b"J").unwrap();
+                        if let Some(notify) = task.notify.as_mut() {
+                            notify.write(b"J").expect("failed to send notification");
                         }
                     });
                 Ok(true)
@@ -169,7 +174,7 @@ impl Zygote<'_, '_> {
             }
         };
         match query {
-            Query::Spawn(ref opts) => self.process_spawn_query(opts)?,
+            Query::Spawn(ref opts) => self.process_spawn_query(opts),
             Query::Exit => return Ok(Some(ReturnCode::OK)),
             Query::GetExitCode(query) => self.process_get_exit_code_query(query.pid)?,
         };
@@ -188,7 +193,7 @@ impl Zygote<'_, '_> {
         let mut sigset = SigSet::empty();
         sigset.add(Signal::SIGCHLD);
         let sig_fd = nix::sys::signalfd::signalfd(-1, &sigset, SfdFlags::SFD_CLOEXEC)?;
-        let sock_fd = self.options.sock.as_raw_fd();
+        let sock_fd = self.options.sock.inner().as_raw();
         loop {
             let mut fdset_read = FdSet::new();
             if crate::linux::check::pidfd_supported() {
@@ -212,7 +217,7 @@ impl Zygote<'_, '_> {
 pub(crate) fn entry(mut options: ZygoteOptions<'_>) -> Result<ReturnCode, Error> {
     let setup_data = setup::setup(
         &options.jail_options,
-        &mut options.sock,
+        &mut options.uid_mapping_done,
         options.cgroup_driver,
     )?;
     let mut zygote = Zygote {

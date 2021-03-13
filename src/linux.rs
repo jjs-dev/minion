@@ -2,6 +2,8 @@ mod cgroup;
 pub mod check;
 pub mod error;
 pub mod ext;
+mod fd;
+mod ipc;
 mod jail_common;
 mod pipe;
 mod sandbox;
@@ -11,6 +13,7 @@ mod zygote;
 
 use crate::{
     linux::{
+        fd::Fd,
         pipe::{LinuxReadPipe, LinuxWritePipe},
         util::{get_last_error, Pid},
     },
@@ -43,7 +46,7 @@ pub struct LinuxChildProcess {
     pid: Pid,
     /// FD of object which will be readable when child finishes.
     /// Wrapped in Option to catch user errors.
-    fd: Option<RawFd>,
+    fd: Option<Fd>,
 }
 
 impl std::fmt::Debug for LinuxChildProcess {
@@ -86,46 +89,47 @@ impl ChildProcess for LinuxChildProcess {
     }
 }
 
-fn handle_input_io(spec: InputSpecification) -> Result<(Option<RawFd>, RawFd), Error> {
+fn handle_input_io(
+    spec: InputSpecification,
+) -> Result<(Option<LinuxWritePipe>, Option<Fd>), Error> {
     match spec.0 {
         InputSpecificationData::Pipe => {
-            let mut h_read = 0;
-            let mut h_write = 0;
-            pipe::setup_pipe(&mut h_read, &mut h_write)?;
-            let f = unsafe { libc::dup(h_read) };
-            unsafe { libc::close(h_read) };
-            Ok((Some(h_write), f))
+            let (tx, rx) = pipe::setup_pipe()?;
+            let f = rx.inner().duplicate_with_inheritance()?;
+            Ok((Some(tx), Some(f)))
         }
         InputSpecificationData::Handle(rh) => {
-            let h = rh as RawFd;
-            Ok((None, h))
+            let h = Fd::new(rh as RawFd);
+            Ok((None, Some(h)))
         }
         InputSpecificationData::Empty => {
             let file = fs::File::create("/dev/null")?;
             let file = file.into_raw_fd();
-            Ok((None, file))
+            let file = Fd::new(file);
+            let file = file.duplicate_with_inheritance()?;
+            Ok((None, Some(file)))
         }
-        InputSpecificationData::Null => Ok((None, -1)),
+        InputSpecificationData::Null => Ok((None, None)),
     }
 }
 
-fn handle_output_io(spec: OutputSpecification) -> Result<(Option<RawFd>, RawFd), Error> {
+fn handle_output_io(
+    spec: OutputSpecification,
+) -> Result<(Option<LinuxReadPipe>, Option<Fd>), Error> {
     match spec.0 {
-        OutputSpecificationData::Null => Ok((None, -1)),
-        OutputSpecificationData::Handle(rh) => Ok((None, rh as RawFd)),
+        OutputSpecificationData::Null => Ok((None, None)),
+        OutputSpecificationData::Handle(rh) => Ok((None, Some(Fd::new(rh as RawFd)))),
         OutputSpecificationData::Pipe => {
-            let mut h_read = 0;
-            let mut h_write = 0;
-            pipe::setup_pipe(&mut h_read, &mut h_write)?;
-            let f = unsafe { libc::dup(h_write) };
-            unsafe { libc::close(h_write) };
-            Ok((Some(h_read), f))
+            let (tx, rx) = pipe::setup_pipe()?;
+            let f = tx.inner().duplicate_with_inheritance()?;
+            Ok((Some(rx), Some(f)))
         }
         OutputSpecificationData::Ignore => {
             let file = fs::File::open("/dev/null")?;
             let file = file.into_raw_fd();
-            let fd = unsafe { libc::dup(file) };
-            Ok((None, fd))
+            let file = Fd::new(file);
+            let file = file.duplicate_with_inheritance()?;
+            Ok((None, Some(file)))
         }
         OutputSpecificationData::Buffer(sz) => {
             let memfd_name = "libminion_output_memfd";
@@ -142,8 +146,9 @@ fn handle_output_io(spec: OutputSpecification) -> Result<(Option<RawFd>, RawFd),
                     });
                 }
             }
-            let child_fd = unsafe { libc::dup(mfd) };
-            Ok((Some(mfd), child_fd))
+            let mfd = Fd::new(mfd);
+            let child_mfd = mfd.duplicate_with_inheritance()?;
+            Ok((Some(LinuxReadPipe::new(mfd)), Some(child_mfd)))
         }
     }
 }
@@ -173,33 +178,11 @@ fn spawn(mut options: ChildProcessOptions<LinuxSandbox>) -> Result<LinuxChildPro
 
         let (job_startup_info, exit_fd) = options.sandbox.spawn_job(q)?;
 
-        // cleanup child stdio now
-        libc::close(in_r);
-        libc::close(out_w);
-        libc::close(err_w);
-
-        let mut stdin = None;
-        if let Some(h) = in_w {
-            stdin.replace(LinuxWritePipe::new(h));
-        }
-
-        let process = |maybe_handle, out: &mut Option<LinuxReadPipe>| {
-            if let Some(h) = maybe_handle {
-                out.replace(LinuxReadPipe::new(h));
-            }
-        };
-
-        let mut stdout = None;
-        let mut stderr = None;
-
-        process(out_r, &mut stdout);
-        process(err_r, &mut stderr);
-
         Ok(LinuxChildProcess {
             exit_code: AtomicI64::new(EXIT_CODE_STILL_RUNNING),
-            stdin,
-            stdout,
-            stderr,
+            stdin: in_w,
+            stdout: out_r,
+            stderr: err_r,
             sandbox_ref: options.sandbox,
             pid: job_startup_info.pid,
             fd: Some(exit_fd),

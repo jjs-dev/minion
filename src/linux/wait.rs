@@ -1,30 +1,14 @@
 //! Implements wait future
 use crate::{
-    linux::{util::Pid, LinuxSandbox},
+    linux::{fd::Fd, util::Pid, LinuxSandbox},
     ExitCode,
 };
 use std::{
-    os::unix::io::RawFd,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
 use tokio::io::unix::AsyncFd;
-
-/// Owns file descriptor.
-struct OwnedFd(RawFd);
-
-impl std::os::unix::io::AsRawFd for OwnedFd {
-    fn as_raw_fd(&self) -> RawFd {
-        self.0
-    }
-}
-
-impl Drop for OwnedFd {
-    fn drop(&mut self) {
-        nix::unistd::close(self.0).unwrap();
-    }
-}
 
 /// Future that resolves when child process exits.
 /// This future internally can work in two mods
@@ -39,18 +23,18 @@ impl Drop for OwnedFd {
 pub struct WaitFuture {
     /// FD of underlying event source (either pidfd or unix socket)
     // TODO: use pipe instead of socket
-    inner: AsyncFd<OwnedFd>,
+    inner: AsyncFd<Fd>,
     sandbox: Arc<LinuxSandbox>,
     pid: Pid,
 }
 
 impl WaitFuture {
     pub(crate) fn new(
-        fd: RawFd,
+        fd: Fd,
         pid: Pid,
         sandbox: Arc<LinuxSandbox>,
     ) -> Result<Self, crate::linux::Error> {
-        let inner = AsyncFd::new(OwnedFd(fd))?;
+        let inner = AsyncFd::new(fd)?;
         Ok(WaitFuture {
             inner,
             sandbox,

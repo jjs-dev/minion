@@ -1,11 +1,9 @@
 use crate::{
     linux::{
+        fd::Fd,
         jail_common::{self, JailOptions},
-        util::{err_exit, IpcSocketExt, StraceLogger},
-        zygote::{
-            SANDBOX_INTERNAL_UID, WM_CLASS_PID_MAP_CREATED, WM_CLASS_PID_MAP_READY_FOR_SETUP,
-            WM_CLASS_SETUP_FINISHED,
-        },
+        util::{err_exit, StraceLogger},
+        zygote::SANDBOX_INTERNAL_UID,
         Error,
     },
     SharedItem, SharedItemKind,
@@ -19,7 +17,6 @@ use std::{
     path::Path,
     ptr, time,
 };
-use tiny_nix_ipc::Socket;
 
 pub(in crate::linux) struct SetupData {
     pub(in crate::linux) cgroup_join_handle: crate::linux::cgroup::JoinHandle,
@@ -161,12 +158,6 @@ fn setup_procfs(jail_options: &JailOptions) -> Result<(), Error> {
     Ok(())
 }
 
-fn setup_uid_mapping(sock: &mut Socket) -> Result<(), Error> {
-    sock.wake(WM_CLASS_PID_MAP_READY_FOR_SETUP)?;
-    sock.lock(WM_CLASS_PID_MAP_CREATED)?;
-    Ok(())
-}
-
 fn setup_time_watch(
     jail_options: &JailOptions,
     cgroup_driver: &crate::linux::cgroup::Driver,
@@ -207,13 +198,16 @@ fn setup_panic_hook() {
 
 pub(in crate::linux) fn setup(
     jail_params: &JailOptions,
-    sock: &mut Socket,
+    uid_mapping_done: &mut Fd,
     cgroup_driver: &crate::linux::cgroup::Driver,
 ) -> Result<SetupData, Error> {
     setup_panic_hook();
     setup_sighandler();
     // must be done before `configure_dir`.
-    setup_uid_mapping(sock)?;
+    {
+        // lock until uids are mapped
+        uid_mapping_done.read(&mut [0])?;
+    }
     configure_dir(&jail_params.isolation_root)?;
     setup_expositions(&jail_params);
     setup_procfs(&jail_params)?;
@@ -226,7 +220,6 @@ pub(in crate::linux) fn setup(
     )?;
     setup_time_watch(&jail_params, cgroup_driver)?;
     setup_chroot(&jail_params)?;
-    sock.wake(WM_CLASS_SETUP_FINISHED)?;
     let mut logger = crate::linux::util::StraceLogger::new();
     writeln!(logger, "sandbox {}: setup done", &jail_params.jail_id).unwrap();
     let res = SetupData { cgroup_join_handle };

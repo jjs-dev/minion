@@ -1,64 +1,58 @@
-use std::{io, os::unix::io::RawFd};
+use crate::linux::{fd::Fd, util::cvt_error};
+use std::io;
 
 pub struct LinuxReadPipe {
-    fd: RawFd,
+    fd: Fd,
 }
 
 impl std::io::Read for LinuxReadPipe {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        nix::unistd::read(self.fd, buf)
-            .map_err(|e| e.as_errno().unwrap())
-            .map_err(Into::into)
+        self.fd.read(buf)
     }
 }
 
 impl LinuxReadPipe {
-    pub(crate) fn new(fd: RawFd) -> LinuxReadPipe {
+    pub fn new(fd: Fd) -> LinuxReadPipe {
         LinuxReadPipe { fd }
     }
-}
 
-impl Drop for LinuxReadPipe {
-    fn drop(&mut self) {
-        nix::unistd::close(self.fd).ok();
+    pub fn inner(&self) -> &Fd {
+        &self.fd
     }
 }
 
 pub struct LinuxWritePipe {
-    fd: RawFd,
-}
-
-impl Drop for LinuxWritePipe {
-    fn drop(&mut self) {
-        nix::unistd::close(self.fd).ok();
-    }
+    fd: Fd,
 }
 
 impl LinuxWritePipe {
-    pub(crate) fn new(fd: RawFd) -> LinuxWritePipe {
+    fn new(fd: Fd) -> LinuxWritePipe {
         LinuxWritePipe { fd }
+    }
+
+    pub fn inner(&self) -> &Fd {
+        &self.fd
+    }
+
+    pub fn into_inner(self) -> Fd {
+        self.fd
     }
 }
 
 impl io::Write for LinuxWritePipe {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        nix::unistd::write(self.fd, buf)
-            .map_err(|e| e.as_errno().unwrap())
-            .map_err(Into::into)
+        self.fd.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        nix::unistd::fsync(self.fd).map_err(|e| e.as_errno().unwrap())?;
-        Ok(())
+        nix::unistd::fsync(self.fd.as_raw()).map_err(cvt_error)
     }
 }
 
-pub(crate) fn setup_pipe(
-    read_end: &mut RawFd,
-    write_end: &mut RawFd,
-) -> Result<(), crate::linux::Error> {
+pub(crate) fn setup_pipe() -> Result<(LinuxWritePipe, LinuxReadPipe), crate::linux::Error> {
     let ends = nix::unistd::pipe2(nix::fcntl::OFlag::O_CLOEXEC)?;
-    *read_end = ends.0;
-    *write_end = ends.1;
-    Ok(())
+    Ok((
+        LinuxWritePipe::new(Fd::new(ends.1)),
+        LinuxReadPipe::new(Fd::new(ends.0)),
+    ))
 }

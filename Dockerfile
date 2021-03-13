@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:experimental
-FROM rust:slim as builder
+# we should return to rust:slim when 1.51 is released
+FROM rustlang/rust:nightly-slim as builder
 WORKDIR /work
 COPY src src
 COPY minion-cli minion-cli
