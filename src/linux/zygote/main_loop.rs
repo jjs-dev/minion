@@ -125,13 +125,30 @@ impl Zygote<'_, '_> {
         }
         let wait_status = nix::sys::wait::waitpid(
             Some(nix::unistd::Pid::from_raw(pid)),
-            Some(nix::sys::wait::WaitPidFlag::WNOHANG),
+            Some(WaitPidFlag::WNOHANG),
         )?;
         match wait_status {
             WaitStatus::Exited(_, exit_code) => self.options.sock.send(&exit_code)?,
+            WaitStatus::Signaled(_, signal, _coredump) => self
+                .options
+                .sock
+                .send(&(signal as i64 + crate::ExitCode::SIGNALLED.0))?,
             other => unreachable!("unexpected WaitStatus: {:?}", other),
         };
         Ok(())
+    }
+
+    fn process_exited_child(&mut self, pid: nix::unistd::Pid, exit_code: i32) {
+        self.tasks
+            .iter_mut()
+            .filter(|task| task.pid == pid.as_raw())
+            .for_each(|task| {
+                let prev = task.exit_code.replace(exit_code);
+                assert!(prev.is_none());
+                if let Some(notify) = task.notify.as_mut() {
+                    notify.write(b"J").expect("failed to send notification");
+                }
+            });
     }
 
     fn reap_child(&mut self) -> Result<bool, Error> {
@@ -139,19 +156,15 @@ impl Zygote<'_, '_> {
 
         match wait_status {
             WaitStatus::Exited(pid, exit_code) => {
-                self.tasks
-                    .iter_mut()
-                    .filter(|task| task.pid == pid.as_raw())
-                    .for_each(|task| {
-                        let prev = task.exit_code.replace(exit_code);
-                        assert!(prev.is_none());
-                        if let Some(notify) = task.notify.as_mut() {
-                            notify.write(b"J").expect("failed to send notification");
-                        }
-                    });
+                self.process_exited_child(pid, exit_code);
                 Ok(true)
             }
             WaitStatus::StillAlive => Ok(false),
+            WaitStatus::Signaled(pid, signal, _coredump) => {
+                let exit_code = crate::ExitCode::SIGNALLED.0 as i32 + signal as i32;
+                self.process_exited_child(pid, exit_code);
+                Ok(true)
+            }
             other => unreachable!("unexpected wait status: {:?}", other),
         }
     }

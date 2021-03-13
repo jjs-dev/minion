@@ -251,11 +251,17 @@ impl ExitCode {
     pub const OK: ExitCode = ExitCode(0);
     /// May be returned when process was killed
     pub const KILLED: ExitCode = ExitCode(0x7eaddeadbeeff00d);
+    /// Base code for reporting signals
+    pub const SIGNALLED: ExitCode = ExitCode(1000);
 }
 
 impl ExitCode {
     pub fn is_success(self) -> bool {
         self.0 == 0
+    }
+
+    pub fn linux_signal(sig: i64) -> ExitCode {
+        ExitCode(sig + Self::SIGNALLED.0)
     }
 }
 
