@@ -44,6 +44,8 @@ pub enum Error {
         #[from]
         cause: IpcError,
     },
+    #[error("Invalid flag used in SharedItem: {flag}")]
+    InvalidSharedItemFlag { flag: String },
 }
 
 impl Error {
@@ -57,6 +59,7 @@ impl Error {
             Error::Cgroup { .. } => ErrorKind::System,
             Error::CgroupDetection { .. } => ErrorKind::System,
             Error::SandboxIpc { .. } => ErrorKind::Sandbox,
+            Error::InvalidSharedItemFlag { .. } => ErrorKind::System,
         }
     }
 

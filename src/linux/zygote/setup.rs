@@ -1,12 +1,12 @@
 use crate::{
     linux::{
         fd::Fd,
-        jail_common::{self, JailOptions},
+        jail_common::{self, JailOptions, LinuxSharedItem, SharedItemFlags},
         util::{err_exit, StraceLogger},
         zygote::SANDBOX_INTERNAL_UID,
         Error,
     },
-    SharedItem, SharedItemKind,
+    SharedItemKind,
 };
 use nix::sys::signal;
 use std::{
@@ -46,7 +46,13 @@ fn configure_dir(dir_path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn expose_item(jail_root: &Path, system_path: &Path, alias_path: &Path, kind: SharedItemKind) {
+fn expose_item(
+    jail_root: &Path,
+    system_path: &Path,
+    alias_path: &Path,
+    kind: SharedItemKind,
+    flags: &SharedItemFlags,
+) {
     let bind_target = jail_root.join(alias_path);
     fs::create_dir_all(&bind_target).unwrap();
     let stat = fs::metadata(&system_path)
@@ -58,23 +64,28 @@ fn expose_item(jail_root: &Path, system_path: &Path, alias_path: &Path, kind: Sh
     let bind_target = CString::new(bind_target.as_os_str().as_bytes()).unwrap();
     let bind_src = CString::new(system_path.as_os_str().as_bytes()).unwrap();
     unsafe {
+        let mut mount_flags = libc::MS_BIND;
+        if flags.recursive {
+            mount_flags |= libc::MS_REC;
+        }
         let mnt_res = libc::mount(
             bind_src.as_ptr(),
             bind_target.as_ptr(),
             ptr::null(),
-            libc::MS_BIND,
+            mount_flags,
             ptr::null(),
         );
         if mnt_res == -1 {
             err_exit("mount");
         }
+        mount_flags |= libc::MS_REMOUNT | libc::MS_RDONLY;
 
         if let SharedItemKind::Readonly = kind {
             let rem_ret = libc::mount(
                 ptr::null(),
                 bind_target.as_ptr(),
                 ptr::null(),
-                libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY,
+                mount_flags,
                 ptr::null(),
             );
             if rem_ret == -1 {
@@ -84,10 +95,10 @@ fn expose_item(jail_root: &Path, system_path: &Path, alias_path: &Path, kind: Sh
     }
 }
 
-pub(crate) fn expose_items(expose: &[SharedItem], jail_root: &Path) {
+pub(crate) fn expose_items(expose: &[LinuxSharedItem], jail_root: &Path) {
     // mount --bind
     for x in expose {
-        expose_item(jail_root, &x.src, &x.dest, x.kind.clone())
+        expose_item(jail_root, &x.src, &x.dest, x.kind.clone(), &x.flags)
     }
 }
 

@@ -26,6 +26,7 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
             src: std::env::current_exe().unwrap(),
             dest: "/me".into(),
             kind: minion::SharedItemKind::Readonly,
+            flags: vec![],
         }],
     };
     let sandbox = backend.new_sandbox(opts).expect("can not create sandbox");

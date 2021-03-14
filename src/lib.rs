@@ -66,6 +66,10 @@ pub struct SharedItem {
     /// Path for child
     pub dest: PathBuf,
     pub kind: SharedItemKind,
+    /// Additional mount flags.
+    /// Meaning is completely backend specific.
+    /// By default, empty list should be used.
+    pub flags: Vec<String>,
 }
 
 /// This struct is returned by `Sandbox::resource_usage`

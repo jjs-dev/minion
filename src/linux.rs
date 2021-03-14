@@ -226,6 +226,11 @@ impl Settings {
         Default::default()
     }
 }
+
+/// Linux backend
+/// # Sandbox extensions
+/// Supported shared items flags:
+///  - `recursive`: use recursive bind mounts (i.e. MS_REC)
 #[derive(Debug)]
 pub struct LinuxBackend {
     settings: Settings,

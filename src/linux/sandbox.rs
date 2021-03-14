@@ -2,12 +2,12 @@ use crate::{
     linux::{
         fd::Fd,
         ipc::Socket,
-        jail_common,
+        jail_common::{self, LinuxSharedItem, SharedItemFlags},
         pipe::{setup_pipe, LinuxReadPipe},
         util::Pid,
         zygote, Error,
     },
-    ExitCode, Sandbox, SandboxOptions,
+    ExitCode, Sandbox, SandboxOptions, SharedItem,
 };
 use parking_lot::Mutex;
 use std::{
@@ -121,6 +121,25 @@ impl Sandbox for LinuxSandbox {
     }
 }
 
+fn convert_shared_item(item: SharedItem) -> Result<LinuxSharedItem, Error> {
+    let mut flags = SharedItemFlags { recursive: false };
+    for f in &item.flags {
+        match f.as_str() {
+            "recursive" => {
+                flags.recursive = true;
+            }
+            _ => return Err(Error::InvalidSharedItemFlag { flag: f.clone() }),
+        }
+    }
+
+    Ok(LinuxSharedItem {
+        src: item.src,
+        dest: item.dest,
+        kind: item.kind,
+        flags,
+    })
+}
+
 pub(crate) struct ExtendedJobQuery {
     pub(crate) job_query: jail_common::JobQuery,
     pub(crate) stdin: Option<Fd>,
@@ -162,13 +181,20 @@ impl LinuxSandbox {
         rx.inner()
             .fcntl(nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK))?;
 
+        let shared_items = options
+            .shared_items
+            .iter()
+            .cloned()
+            .map(convert_shared_item)
+            .collect::<Result<Vec<_>, _>>()?;
+
         let jail_options = jail_common::JailOptions {
             max_alive_process_count: options.max_alive_process_count,
             memory_limit: options.memory_limit,
             cpu_time_limit: options.cpu_time_limit,
             real_time_limit: options.real_time_limit,
             isolation_root: options.isolation_root.clone(),
-            shared_items: options.shared_items.clone(),
+            shared_items,
             jail_id: jail_id.clone(),
             watchdog_chan: tx.into_inner().into_raw(),
             allow_mount_ns_failure: settings.allow_unsupported_mount_namespace,
