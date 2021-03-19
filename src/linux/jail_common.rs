@@ -20,6 +20,7 @@ pub(crate) struct JailOptions {
     pub(crate) jail_id: String,
     pub(crate) watchdog_chan: RawFd,
     pub(crate) allow_mount_ns_failure: bool,
+    pub(crate) sandbox_uid: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -82,6 +83,7 @@ pub(crate) enum Query {
 }
 
 fn send_term_signals(target_pid: Pid) {
+    // TODO: maybe SIGKILL is enough?
     for &sig in &[
         nix::sys::signal::SIGKILL,
         nix::sys::signal::SIGTERM,

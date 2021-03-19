@@ -4,6 +4,7 @@ use crate::{
         ipc::Socket,
         jail_common::{self, LinuxSharedItem, SharedItemFlags},
         pipe::{setup_pipe, LinuxReadPipe},
+        uid_alloc::UidAllocator,
         util::Pid,
         zygote, Error,
     },
@@ -61,6 +62,7 @@ pub struct LinuxSandbox {
     state: SandboxState,
     watchdog_chan: Mutex<LinuxReadPipe>,
     cgroup_driver: Arc<crate::linux::cgroup::Driver>,
+    dealloc_uid: Option<(Arc<UidAllocator>, u32)>,
 }
 
 #[derive(Debug)]
@@ -175,6 +177,7 @@ impl LinuxSandbox {
         options: SandboxOptions,
         settings: &crate::linux::Settings,
         cgroup_driver: Arc<crate::linux::cgroup::Driver>,
+        uid_alloc: Arc<UidAllocator>,
     ) -> Result<LinuxSandbox, Error> {
         let jail_id = jail_common::gen_jail_id();
         let (tx, rx) = setup_pipe()?;
@@ -188,6 +191,21 @@ impl LinuxSandbox {
             .map(convert_shared_item)
             .collect::<Result<Vec<_>, _>>()?;
 
+        let (uid_alloc, sandbox_uid) = if settings.rootless {
+            (None, nix::unistd::Uid::effective().as_raw())
+        } else {
+            (
+                Some(uid_alloc.clone()),
+                uid_alloc.allocate().ok_or(Error::UidExhausted)?,
+            )
+        };
+
+        tracing::debug!(
+            unique = uid_alloc.is_some(),
+            uid = sandbox_uid,
+            "Selected sandbox_uid"
+        );
+
         let jail_options = jail_common::JailOptions {
             max_alive_process_count: options.max_alive_process_count,
             memory_limit: options.memory_limit,
@@ -198,6 +216,7 @@ impl LinuxSandbox {
             jail_id: jail_id.clone(),
             watchdog_chan: tx.into_inner().into_raw(),
             allow_mount_ns_failure: settings.allow_unsupported_mount_namespace,
+            sandbox_uid,
         };
         let startup_info = zygote::start_zygote(jail_options, &cgroup_driver)?;
 
@@ -212,6 +231,7 @@ impl LinuxSandbox {
             },
             watchdog_chan: Mutex::new(rx),
             cgroup_driver,
+            dealloc_uid: uid_alloc.map(|uid_alloc| (uid_alloc, sandbox_uid)),
         };
 
         Ok(sandbox)
@@ -250,7 +270,13 @@ impl LinuxSandbox {
 }
 
 impl Drop for LinuxSandbox {
+    #[tracing::instrument(skip(self), fields(id = self.id.as_str()))]
     fn drop(&mut self) {
+        // Reclaim UID
+        if let Some((uid_alloc, sandbox_uid)) = self.dealloc_uid.take() {
+            tracing::debug!(uid = sandbox_uid, "Freeing sandbox_uid");
+            uid_alloc.deallocate(sandbox_uid);
+        }
         // Kill all processes.
         if let Err(err) = self.kill() {
             panic!("unable to kill sandbox: {}", err);
