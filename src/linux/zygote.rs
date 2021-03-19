@@ -321,7 +321,12 @@ fn start_zygote_caller(
         assert_eq!(len, 4);
     }
     let zygote_pid = i32::from_ne_bytes(zygote_pid);
-    let mapping = format!("{} {} 1", SANDBOX_INTERNAL_UID, jail_options.sandbox_uid);
+    let mapping = format!(
+        "0 {} 1\n{} {} 1",
+        nix::unistd::Uid::effective().as_raw(),
+        SANDBOX_INTERNAL_UID,
+        jail_options.sandbox_uid
+    );
     let uid_map_path = format!("/proc/{}/uid_map", zygote_pid);
     let gid_map_path = format!("/proc/{}/gid_map", zygote_pid);
     let setgroups_path = format!("/proc/{}/setgroups", zygote_pid);
