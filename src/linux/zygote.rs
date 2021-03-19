@@ -10,7 +10,7 @@ use crate::linux::{
     fd::Fd,
     ipc::Socket,
     jail_common::{self, JailOptions},
-    util::{duplicate_string, err_exit, Pid, Uid},
+    util::{duplicate_string, err_exit, Uid},
     Error,
 };
 use libc::c_char;
@@ -257,9 +257,12 @@ pub(in crate::linux) fn start_zygote(
     jail_options: JailOptions,
     cgroup_driver: &crate::linux::cgroup::Driver,
 ) -> Result<jail_common::ZygoteStartupInfo, Error> {
-    let (socket, zyg_sock) = Socket::pair()?;
+    let (client_socket, zyg_sock) = Socket::pair()?;
 
-    let (return_allowed_r, return_allowed_w) = nix::unistd::pipe()?;
+    let (zygote_pid_r, zygote_pid_w) =
+        nix::unistd::pipe().map(|(x, y)| (Fd::new(x), Fd::new(y)))?;
+    let (uid_mapping_done_r, uid_mapping_done_w) =
+        nix::unistd::pipe().map(|(x, y)| (Fd::new(x), Fd::new(y)))?;
 
     match unsafe { nix::unistd::fork() }? {
         nix::unistd::ForkResult::Child => {
@@ -275,98 +278,64 @@ pub(in crate::linux) fn start_zygote(
                     Err(err)
                 }
             })?;
-            let (uid_mapping_done_r, uid_mapping_done_w) = nix::unistd::pipe()?;
-            let sandbox_uid = jail_options.sandbox_uid;
             match unsafe { nix::unistd::fork() }? {
                 nix::unistd::ForkResult::Child => start_zygote_main_process(
                     jail_options,
-                    Fd::new(uid_mapping_done_r),
+                    uid_mapping_done_r,
                     zyg_sock,
                     cgroup_driver,
                 ),
-                nix::unistd::ForkResult::Parent { child } => start_zygote_initialization_helper(
-                    zyg_sock,
-                    child.as_raw(),
-                    jail_options,
-                    return_allowed_w,
-                    Fd::new(uid_mapping_done_w),
-                    sandbox_uid,
-                )
-                .map(|never| match never {}),
+                nix::unistd::ForkResult::Parent { child } => {
+                    let len = zygote_pid_w
+                        .write(&child.as_raw().to_ne_bytes())
+                        .expect("failed to send zygote pid");
+                    assert!(len == 4);
+                    std::process::exit(0);
+                }
             }
         }
         nix::unistd::ForkResult::Parent { .. } => Ok(start_zygote_caller(
-            return_allowed_r,
-            return_allowed_w,
             jail_options,
-            socket,
+            client_socket,
+            zygote_pid_r,
+            uid_mapping_done_w,
         )),
     }
 }
 
 /// Thread A it is thread that entered start_zygote() normally, returns from function
 fn start_zygote_caller(
-    return_allowed_r: RawFd,
-    return_allowed_w: RawFd,
     jail_options: JailOptions,
     socket: Socket,
+    zygote_pid_r: Fd,
+    uid_mapping_done: Fd,
 ) -> ZygoteStartupInfo {
     let mut logger = crate::linux::util::strace_logger();
     write!(logger, "sandbox {}: thread A (main)", &jail_options.jail_id).unwrap();
 
-    let mut zygote_pid_bytes = [0; 4];
-
-    // Wait until zygote is ready.
-    // Zygote is ready when zygote launcher returns it's pid
-    nix::unistd::read(return_allowed_r, &mut zygote_pid_bytes).expect("protocol violation");
-    nix::unistd::close(return_allowed_r).unwrap();
-    nix::unistd::close(return_allowed_w).unwrap();
-    nix::unistd::close(jail_options.watchdog_chan).unwrap();
-    jail_common::ZygoteStartupInfo {
-        socket,
-        zygote_pid: i32::from_ne_bytes(zygote_pid_bytes),
+    let mut zygote_pid = [0; 4];
+    {
+        let len = zygote_pid_r
+            .read(&mut zygote_pid)
+            .expect("failed to receive zygote pid");
+        assert_eq!(len, 4);
     }
-}
+    let zygote_pid = i32::from_ne_bytes(zygote_pid);
+    let mapping = format!("{} {} 1", SANDBOX_INTERNAL_UID, jail_options.sandbox_uid);
+    let uid_map_path = format!("/proc/{}/uid_map", zygote_pid);
+    let gid_map_path = format!("/proc/{}/gid_map", zygote_pid);
+    let setgroups_path = format!("/proc/{}/setgroups", zygote_pid);
 
-/// Thread B is zygote initialization helper, external to sandbox.
-fn start_zygote_initialization_helper(
-    zyg_sock: Socket,
-    child_pid: Pid,
-    jail_options: JailOptions,
-    return_allowed_w: RawFd,
-    uid_mappindg_done: Fd,
-    sandbox_uid: u32,
-) -> Result<std::convert::Infallible, Error> {
-    let mut logger = crate::linux::util::strace_logger();
-    write!(
-        logger,
-        "sandbox {}: thread B (zygote launcher)",
-        &jail_options.jail_id
-    )
-    .unwrap();
-    mem::drop(zyg_sock);
-
-    // currently our only task is to setup uid/gid mapping.
-
-    // map sandbox uid: internal to external.
-    let mapping = format!("{} {} 1", SANDBOX_INTERNAL_UID, sandbox_uid);
-    let uid_map_path = format!("/proc/{}/uid_map", child_pid);
-    let gid_map_path = format!("/proc/{}/gid_map", child_pid);
-    let setgroups_path = format!("/proc/{}/setgroups", child_pid);
-    //socket.lock(WM_CLASS_PID_MAP_READY_FOR_SETUP)?;
     fs::write(setgroups_path, "deny").unwrap();
+
     fs::write(&uid_map_path, mapping.as_str()).unwrap();
     fs::write(&gid_map_path, mapping.as_str()).unwrap();
-    uid_mappindg_done
+
+    uid_mapping_done
         .write(b"D")
         .expect("failed to notify zygote that UIDs are remapped");
-    //socket.wake(WM_CLASS_PID_MAP_CREATED)?;
-    //socket.lock(WM_CLASS_SETUP_FINISHED)?;
-    // And now thread A can return.
-    nix::unistd::write(return_allowed_w, &child_pid.to_ne_bytes()).expect("protocol violation");
-    unsafe {
-        libc::exit(0);
-    }
+
+    ZygoteStartupInfo { socket, zygote_pid }
 }
 
 /// Thread C is zygote main process
