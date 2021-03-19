@@ -46,6 +46,8 @@ pub enum Error {
     },
     #[error("Invalid flag used in SharedItem: {flag}")]
     InvalidSharedItemFlag { flag: String },
+    #[error("uid range exhausted")]
+    UidExhausted,
 }
 
 impl Error {
@@ -60,6 +62,7 @@ impl Error {
             Error::CgroupDetection { .. } => ErrorKind::System,
             Error::SandboxIpc { .. } => ErrorKind::Sandbox,
             Error::InvalidSharedItemFlag { .. } => ErrorKind::System,
+            Error::UidExhausted => ErrorKind::System,
         }
     }
 

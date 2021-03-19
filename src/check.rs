@@ -31,6 +31,10 @@ impl CheckResult {
     pub fn has_errors(&self) -> bool {
         !self.errors.is_empty()
     }
+    /// Checks if any warnings were reported
+    pub fn has_warnings(&self) -> bool {
+        !self.warnings.is_empty()
+    }
 }
 
 impl std::fmt::Display for CheckResult {

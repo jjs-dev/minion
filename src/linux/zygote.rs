@@ -263,7 +263,6 @@ pub(in crate::linux) fn start_zygote(
 
     match unsafe { nix::unistd::fork() }? {
         nix::unistd::ForkResult::Child => {
-            let sandbox_uid = nix::unistd::Uid::effective();
             // why we use unshare(PID) here, and not in setup_namespace()? See pid_namespaces(7) and unshare(2)
             let unshare_ns = nix::sched::CloneFlags::CLONE_NEWUSER
                 | nix::sched::CloneFlags::CLONE_NEWPID
@@ -277,6 +276,7 @@ pub(in crate::linux) fn start_zygote(
                 }
             })?;
             let (uid_mapping_done_r, uid_mapping_done_w) = nix::unistd::pipe()?;
+            let sandbox_uid = jail_options.sandbox_uid;
             match unsafe { nix::unistd::fork() }? {
                 nix::unistd::ForkResult::Child => start_zygote_main_process(
                     jail_options,
@@ -290,7 +290,7 @@ pub(in crate::linux) fn start_zygote(
                     jail_options,
                     return_allowed_w,
                     Fd::new(uid_mapping_done_w),
-                    sandbox_uid.as_raw(),
+                    sandbox_uid,
                 )
                 .map(|never| match never {}),
             }

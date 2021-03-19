@@ -7,6 +7,7 @@ mod ipc;
 mod jail_common;
 mod pipe;
 mod sandbox;
+mod uid_alloc;
 mod util;
 mod wait;
 mod zygote;
@@ -33,6 +34,8 @@ use std::{
         Arc,
     },
 };
+
+use self::uid_alloc::UidAllocator;
 
 pub type LinuxHandle = libc::c_int;
 pub struct LinuxChildProcess {
@@ -190,6 +193,21 @@ fn spawn(mut options: ChildProcessOptions<LinuxSandbox>) -> Result<LinuxChildPro
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct UserIdBounds {
+    pub low: u32,
+    pub high: u32,
+}
+
+impl Default for UserIdBounds {
+    fn default() -> Self {
+        UserIdBounds {
+            low: 100_000,
+            high: 200_000,
+        }
+    }
+}
+
 /// Allows some customization
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -207,6 +225,15 @@ pub struct Settings {
     /// If enabled, minion will ignore clone(MOUNT_NEWNS) error.
     /// This flag has to be enabled for gVisor support.
     pub allow_unsupported_mount_namespace: bool,
+
+    /// Do not perform actions that require root access.
+    /// Note that some other options may require root as well.
+    pub rootless: bool,
+
+    /// User identifiers to use for the sandboxes.
+    /// Ignored in rootless mode (because calling process uid will be used
+    /// instead). Also applies to GIDs
+    pub uid: UserIdBounds,
 }
 
 impl Default for Settings {
@@ -217,6 +244,8 @@ impl Default for Settings {
             cgroupfs: std::env::var_os("MINION_CGROUPFS")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("/sys/fs/cgroup")),
+            rootless: !nix::unistd::Uid::effective().is_root(),
+            uid: Default::default(),
         }
     }
 }
@@ -235,6 +264,8 @@ impl Settings {
 pub struct LinuxBackend {
     settings: Settings,
     cgroup_driver: Arc<cgroup::Driver>,
+    // used for allocating sandbox UIDs when we are root
+    uid_alloc: Arc<UidAllocator>,
 }
 
 impl Backend for LinuxBackend {
@@ -243,8 +274,14 @@ impl Backend for LinuxBackend {
     type ChildProcess = LinuxChildProcess;
     fn new_sandbox(&self, mut options: SandboxOptions) -> Result<LinuxSandbox, Error> {
         options.postprocess();
-        let sb =
-            unsafe { LinuxSandbox::create(options, &self.settings, self.cgroup_driver.clone())? };
+        let sb = unsafe {
+            LinuxSandbox::create(
+                options,
+                &self.settings,
+                self.cgroup_driver.clone(),
+                self.uid_alloc.clone(),
+            )?
+        };
         Ok(sb)
     }
 
@@ -260,9 +297,11 @@ impl LinuxBackend {
     pub fn new(settings: Settings) -> Result<LinuxBackend, Error> {
         self::check::run_all_feature_checks();
         let cgroup_driver = Arc::new(cgroup::Driver::new(&settings)?);
+        let uid_alloc = Arc::new(UidAllocator::new(settings.uid.low, settings.uid.high));
         Ok(LinuxBackend {
             settings,
             cgroup_driver,
+            uid_alloc,
         })
     }
 }
