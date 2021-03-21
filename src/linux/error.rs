@@ -48,6 +48,8 @@ pub enum Error {
     InvalidSharedItemFlag { flag: String },
     #[error("uid range exhausted")]
     UidExhausted,
+    #[error("sandbox was destroyed")]
+    SandboxGone,
 }
 
 impl Error {
@@ -63,6 +65,7 @@ impl Error {
             Error::SandboxIpc { .. } => ErrorKind::Sandbox,
             Error::InvalidSharedItemFlag { .. } => ErrorKind::System,
             Error::UidExhausted => ErrorKind::System,
+            Error::SandboxGone => ErrorKind::System,
         }
     }
 

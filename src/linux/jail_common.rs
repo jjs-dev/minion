@@ -75,26 +75,6 @@ pub(crate) struct ZygoteStartupInfo {
 #[derive(Serialize, Deserialize, Debug)]
 #[repr(C)]
 pub(crate) enum Query {
-    // TODO: is this used?
-    Exit,
     Spawn(JobQuery),
     GetExitCode(GetExitCodeQuery),
-}
-
-fn send_term_signals(target_pid: Pid) {
-    // TODO: maybe SIGKILL is enough?
-    for &sig in &[
-        nix::sys::signal::SIGKILL,
-        nix::sys::signal::SIGTERM,
-        nix::sys::signal::SIGABRT,
-    ] {
-        nix::sys::signal::kill(nix::unistd::Pid::from_raw(target_pid), sig).ok();
-    }
-}
-
-/// Kills sandbox by zygote pid and cgroup_id
-pub(in crate::linux) fn kill_sandbox(zygote_pid: Pid) {
-    // We will kill zygote, and
-    // kernel will kill all other processes by itself.
-    send_term_signals(zygote_pid);
 }
