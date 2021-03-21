@@ -4,13 +4,13 @@ use self::watchdog::{watchdog, Event};
 use crate::{
     linux::{
         fd::Fd,
-        ipc::Socket,
-        jail_common::{self, LinuxSharedItem, SharedItemFlags},
+        jail_common::{self, LinuxSharedItem, SharedItemFlags, ZygoteInfo},
+        limits::ResourceLimits,
         uid_alloc::UidAllocator,
         util::Pid,
         zygote, Error,
     },
-    ExitCode, Sandbox, SandboxOptions, SharedItem,
+    ExitCode, ResourceUsageData, Sandbox, SandboxOptions, SharedItem,
 };
 use parking_lot::Mutex;
 use std::{
@@ -46,20 +46,6 @@ impl SandboxState {
     }
 }
 
-#[derive(Debug)]
-struct ZygoteInfo {
-    sock: Socket,
-    pid: Pid,
-}
-
-impl Drop for ZygoteInfo {
-    fn drop(&mut self) {
-        // We will kill zygote, and
-        // kernel will kill all other processes by itself.
-        send_term_signals(self.pid);
-    }
-}
-
 #[repr(C)]
 #[derive(Debug)]
 pub struct LinuxSandbox {
@@ -68,7 +54,7 @@ pub struct LinuxSandbox {
     zygote: Arc<Mutex<Option<ZygoteInfo>>>,
     state: SandboxState,
     watchdog_chan: crossbeam_channel::Receiver<Event>,
-    cgroup_driver: Arc<crate::linux::cgroup::Driver>,
+    driver: Arc<crate::linux::limits::Driver>,
     dealloc_uid: Option<(Arc<UidAllocator>, u32)>,
 }
 
@@ -94,12 +80,11 @@ impl Sandbox for LinuxSandbox {
         Ok(())
     }
 
-    fn resource_usage(&self) -> Result<crate::ResourceUsageData, Error> {
-        let cpu_usage = self.cgroup_driver.get_cpu_usage(&self.id)?;
-        let memory_usage = self.cgroup_driver.get_memory_usage(&self.id)?;
-        Ok(crate::ResourceUsageData {
-            memory: memory_usage,
-            time: Some(cpu_usage),
+    fn resource_usage(&self) -> Result<ResourceUsageData, Error> {
+        let usage = self.driver.resource_usage(&self.id)?;
+        Ok(ResourceUsageData {
+            time: Some(usage.time),
+            memory: usage.memory,
         })
     }
 }
@@ -143,10 +128,10 @@ impl LinuxSandbox {
         z.as_mut().map(f)
     }
 
-    pub(in crate::linux) unsafe fn create(
+    pub(in crate::linux) fn create(
         options: SandboxOptions,
         settings: &crate::linux::Settings,
-        cgroup_driver: Arc<crate::linux::cgroup::Driver>,
+        driver: Arc<crate::linux::limits::Driver>,
         uid_alloc: Arc<UidAllocator>,
     ) -> Result<LinuxSandbox, Error> {
         let jail_id = jail_common::gen_jail_id();
@@ -183,23 +168,41 @@ impl LinuxSandbox {
             jail_id: jail_id.clone(),
             allow_mount_ns_failure: settings.allow_unsupported_mount_namespace,
             sandbox_uid,
+            enable_watchdog: driver.get_watchdog(),
         };
-        let startup_info = zygote::start_zygote(jail_options, &cgroup_driver)?;
+
+        let resource_group_enter_handle = driver.create_group(
+            &jail_options.jail_id,
+            &ResourceLimits {
+                pids_max: jail_options.max_alive_process_count,
+                memory_max: jail_options.memory_limit,
+                cpu_usage: jail_options
+                    .cpu_time_limit
+                    .as_nanos()
+                    .try_into()
+                    .expect("too big CPU time limit"),
+            },
+        )?;
+
+        let startup_info = zygote::start_zygote(jail_options, &resource_group_enter_handle)?;
+
+        let zygote = Arc::new(Mutex::new(Some(ZygoteInfo {
+            sock: startup_info.socket,
+            pid: startup_info.zygote_pid,
+        })));
+        driver.register_group_details(&jail_id, zygote.clone());
 
         let (watchdog_tx, watchdog_rx) = crossbeam_channel::unbounded();
         let sandbox = LinuxSandbox {
             id: jail_id.clone(),
             options: options.clone(),
-            zygote: Arc::new(Mutex::new(Some(ZygoteInfo {
-                sock: startup_info.socket,
-                pid: startup_info.zygote_pid,
-            }))),
+            zygote,
             state: SandboxState {
                 was_cpu_tle: AtomicBool::new(false),
                 was_wall_tle: AtomicBool::new(false),
             },
             watchdog_chan: watchdog_rx,
-            cgroup_driver: cgroup_driver.clone(),
+            driver: driver.clone(),
             dealloc_uid: uid_alloc.map(|uid_alloc| (uid_alloc, sandbox_uid)),
         };
         tokio::task::spawn(watchdog(
@@ -215,7 +218,7 @@ impl LinuxSandbox {
                 .try_into()
                 .expect("too big real time limit"),
             watchdog_tx,
-            cgroup_driver,
+            driver,
             sandbox.zygote.clone(),
         ));
 
@@ -249,10 +252,10 @@ impl LinuxSandbox {
             zyg.sock.send(&q).ok();
             match zyg.sock.recv::<i64>() {
                 Ok(ec) => ExitCode(ec),
-                Err(_) => crate::ExitCode::KILLED,
+                Err(_) => ExitCode::KILLED,
             }
         })
-        .unwrap_or(crate::ExitCode::KILLED)
+        .unwrap_or(ExitCode::KILLED)
     }
 }
 
@@ -266,23 +269,13 @@ impl Drop for LinuxSandbox {
         }
         // Kill all processes.
         if let Err(err) = self.kill() {
-            panic!("unable to kill sandbox: {}", err);
+            tracing::error!("unable to kill sandbox: {}", err);
         }
         // Remove cgroups.
         if std::env::var("MINION_DEBUG_KEEP_CGROUPS").is_err() {
-            self.cgroup_driver
-                .drop_cgroup(&self.id, &["pids", "memory", "cpuacct"]);
+            if let Err(e) = self.driver.delete_group(&self.id) {
+                tracing::error!("failed to delete cgroup: {:#}", e);
+            }
         }
-    }
-}
-
-fn send_term_signals(target_pid: Pid) {
-    // TODO: maybe SIGKILL is enough?
-    for &sig in &[
-        nix::sys::signal::SIGKILL,
-        nix::sys::signal::SIGTERM,
-        nix::sys::signal::SIGABRT,
-    ] {
-        nix::sys::signal::kill(nix::unistd::Pid::from_raw(target_pid), sig).ok();
     }
 }

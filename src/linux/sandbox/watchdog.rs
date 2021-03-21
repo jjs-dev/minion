@@ -21,7 +21,7 @@ pub(super) async fn watchdog(
     cpu_time_limit: u64,
     real_time_limit: u64,
     chan: crossbeam_channel::Sender<Event>,
-    driver: Arc<crate::linux::cgroup::Driver>,
+    driver: Arc<crate::linux::limits::Driver>,
     zygote: Arc<Mutex<Option<ZygoteInfo>>>,
 ) {
     let start = Instant::now();
@@ -50,11 +50,14 @@ pub(super) async fn watchdog(
             let _enter = span.enter();
             let elapsed = Instant::now().duration_since(start);
             let elapsed = elapsed.as_nanos() as u64;
-            let current_usage = driver.get_cpu_usage(&jail_id).unwrap_or_else(|err| {
-                tracing::error!("failed to get time usage: {:?}", err);
-                tracing::error!("WARNING: assuming time limit exceeded");
-                u64::max_value()
-            });
+            let current_usage = driver
+                .resource_usage(&jail_id)
+                .map(|usage| usage.time)
+                .unwrap_or_else(|err| {
+                    tracing::error!("failed to get time usage: {:?}", err);
+                    tracing::error!("WARNING: assuming time limit exceeded");
+                    u64::max_value()
+                });
             tracing::debug!(
                 cpu_usage = current_usage,
                 real_usage = elapsed,

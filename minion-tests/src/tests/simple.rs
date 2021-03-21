@@ -34,8 +34,11 @@ impl crate::TestCase for TTl {
     fn test(&self) -> ! {
         exceed_time_limit()
     }
-    fn check(&self, cp: crate::CompletedChild, _: &dyn Sandbox) {
+    fn check(&self, cp: crate::CompletedChild, _sb: &dyn Sandbox) {
         super::assert_killed(cp);
+        // FIXME: enable asserts when testing cgroups:
+        // assert!(sb.check_cpu_tle().unwrap());
+        // assert!(!sb.check_real_tle().unwrap());
     }
 }
 
@@ -128,7 +131,15 @@ impl crate::TestCase for TOom {
     }
 
     fn check(&self, cp: crate::CompletedChild, sb: &dyn Sandbox) {
-        super::assert_exit_code(cp, minion::ExitCode::linux_signal(9));
+        super::assert_exit_code_in(
+            cp,
+            &[
+                // killed by OOMKiller
+                minion::ExitCode::linux_signal(9),
+                // got a nullptr
+                minion::ExitCode::linux_signal(11),
+            ],
+        );
         assert!(!sb.check_cpu_tle().unwrap());
         assert!(!sb.check_real_tle().unwrap());
     }

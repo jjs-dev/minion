@@ -4,6 +4,10 @@ version = "0.1.0"
 authors = ["Mikail Bagishov <bagishov.mikail@yandex.ru>"]
 edition = "2018"
 
+[features]
+# Never enable this feature. Its only consumer is minion-tests
+internal_dev = []
+
 [dependencies]
 libc = "0.2.88"
 errno = "0.2.7"
