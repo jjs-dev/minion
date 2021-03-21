@@ -74,11 +74,6 @@ impl Driver {
         std::fs::remove_dir(self.get_path_for_cgroup_unified(cgroup_id)).ok();
     }
 
-    pub(super) fn get_cgroup_tasks_file_path_v2(&self, cgroup_id: &str) -> PathBuf {
-        self.get_path_for_cgroup_unified(cgroup_id)
-            .join("cgroup.procs")
-    }
-
     fn get_cgroup_prefix(&self) -> PathBuf {
         let mut p = self.cgroupfs_path.clone();
         for comp in &self.cgroup_prefix {

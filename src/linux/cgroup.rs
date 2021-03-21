@@ -260,12 +260,6 @@ impl Driver {
         };
         Ok(usage)
     }
-    pub(in crate::linux) fn get_cgroup_tasks_file_path(&self, cgroup_id: &str) -> PathBuf {
-        match self.version {
-            CgroupVersion::V1 => self.get_cgroup_tasks_file_path_v1(cgroup_id),
-            CgroupVersion::V2 => self.get_cgroup_tasks_file_path_v2(cgroup_id),
-        }
-    }
 
     pub(in crate::linux) fn drop_cgroup(&self, cgroup_id: &str, legacy_subsystems: &[&str]) {
         match self.version {

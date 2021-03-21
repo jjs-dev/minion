@@ -104,11 +104,6 @@ impl super::Driver {
         }
     }
 
-    pub(super) fn get_cgroup_tasks_file_path_v1(&self, cgroup_id: &str) -> PathBuf {
-        self.get_path_for_cgroup_legacy_subsystem("pids", cgroup_id)
-            .join("tasks")
-    }
-
     fn get_path_for_cgroup_legacy_subsystem(&self, subsys_name: &str, cgroup_id: &str) -> PathBuf {
         let mut p = self.cgroupfs_path.clone();
         p.push(subsys_name);
