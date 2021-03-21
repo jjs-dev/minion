@@ -6,6 +6,7 @@ use std::{
 };
 
 /// Represents owned file descriptor
+#[derive(Debug)]
 pub struct Fd(RawFd);
 
 impl AsRawFd for Fd {

@@ -1,7 +1,7 @@
 use crate::{
     linux::{
         fd::Fd,
-        jail_common::{self, JailOptions, LinuxSharedItem, SharedItemFlags},
+        jail_common::{JailOptions, LinuxSharedItem, SharedItemFlags},
         util::{err_exit, StraceLogger},
         zygote::SANDBOX_INTERNAL_UID,
         Error,
@@ -9,14 +9,7 @@ use crate::{
     SharedItemKind,
 };
 use nix::sys::signal;
-use std::{
-    ffi::CString,
-    fs, io,
-    io::Write,
-    os::unix::{ffi::OsStrExt, io::RawFd},
-    path::Path,
-    ptr, time,
-};
+use std::{ffi::CString, fs, io, io::Write, os::unix::ffi::OsStrExt, path::Path, ptr};
 
 pub(in crate::linux) struct SetupData {
     pub(in crate::linux) cgroup_join_handle: crate::linux::cgroup::JoinHandle,
@@ -169,21 +162,6 @@ fn setup_procfs(jail_options: &JailOptions) -> Result<(), Error> {
     Ok(())
 }
 
-fn setup_time_watch(
-    jail_options: &JailOptions,
-    cgroup_driver: &crate::linux::cgroup::Driver,
-) -> Result<(), Error> {
-    let cpu_tl = jail_options.cpu_time_limit.as_nanos() as u64;
-    let real_tl = jail_options.real_time_limit.as_nanos() as u64;
-    observe_time(
-        &jail_options.jail_id,
-        cpu_tl,
-        real_tl,
-        jail_options.watchdog_chan,
-        cgroup_driver,
-    )
-}
-
 fn setup_expositions(options: &JailOptions) {
     expose_items(&options.shared_items, &options.isolation_root);
 }
@@ -229,75 +207,9 @@ pub(in crate::linux) fn setup(
             memory_max: jail_params.memory_limit,
         },
     )?;
-    setup_time_watch(&jail_params, cgroup_driver)?;
     setup_chroot(&jail_params)?;
     let mut logger = crate::linux::util::StraceLogger::new();
     writeln!(logger, "sandbox {}: setup done", &jail_params.jail_id).unwrap();
     let res = SetupData { cgroup_join_handle };
     Ok(res)
-}
-
-/// Internal function, kills processes which used all their CPU time limit.
-/// Limits are given in nanoseconds
-fn cpu_time_observer(
-    jail_id: &str,
-    cpu_time_limit: u64,
-    real_time_limit: u64,
-    chan: std::os::unix::io::RawFd,
-    driver: &crate::linux::cgroup::Driver,
-) -> ! {
-    let mut logger = crate::linux::util::StraceLogger::new();
-    writeln!(logger, "sandbox {}: cpu time watcher", jail_id).unwrap();
-    let start = time::Instant::now();
-    loop {
-        nix::unistd::sleep(1);
-
-        let elapsed = time::Instant::now().duration_since(start);
-        let elapsed = elapsed.as_nanos();
-        let current_usage = driver.get_cpu_usage(jail_id).unwrap_or_else(|err| {
-            eprintln!("sandbox {}: failed to get time usage: {:?}", jail_id, err);
-            eprintln!("WARNING: assuming time limit exceeded");
-            u64::max_value()
-        });
-        let was_cpu_tle = current_usage > cpu_time_limit;
-        let was_real_tle = elapsed as u64 > real_time_limit;
-        let ok = !was_cpu_tle && !was_real_tle;
-        if ok {
-            continue;
-        }
-        if was_cpu_tle {
-            writeln!(logger, "minion-watchdog: CPU time limit exceeded").unwrap();
-            nix::unistd::write(chan, b"c").ok();
-        } else if was_real_tle {
-            writeln!(
-                logger,
-                "minion-watchdog: Real time limit exceeded: limit {}ns, used {}ns",
-                real_time_limit, elapsed
-            )
-            .unwrap();
-            nix::unistd::write(chan, b"r").ok();
-        }
-        jail_common::kill_this_sandbox();
-    }
-}
-
-fn observe_time(
-    jail_id: &str,
-    cpu_time_limit: u64,
-    real_time_limit: u64,
-    chan: RawFd,
-    cgroup_driver: &crate::linux::cgroup::Driver,
-) -> Result<(), Error> {
-    let fret = unsafe { nix::unistd::fork() }?;
-
-    match fret {
-        nix::unistd::ForkResult::Child => cpu_time_observer(
-            jail_id,
-            cpu_time_limit,
-            real_time_limit,
-            chan,
-            cgroup_driver,
-        ),
-        nix::unistd::ForkResult::Parent { .. } => Ok(()),
-    }
 }

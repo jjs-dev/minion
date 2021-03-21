@@ -22,6 +22,7 @@ pub enum IpcError {
     Ancillary,
 }
 
+#[derive(Debug)]
 pub struct Socket {
     fd: Fd,
 }

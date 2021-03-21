@@ -1,9 +1,11 @@
+mod watchdog;
+
+use self::watchdog::{watchdog, Event};
 use crate::{
     linux::{
         fd::Fd,
         ipc::Socket,
         jail_common::{self, LinuxSharedItem, SharedItemFlags},
-        pipe::{setup_pipe, LinuxReadPipe},
         uid_alloc::UidAllocator,
         util::Pid,
         zygote, Error,
@@ -12,9 +14,8 @@ use crate::{
 };
 use parking_lot::Mutex;
 use std::{
-    fmt::{self, Debug},
-    io::Read,
-    os::unix::io::RawFd,
+    convert::TryInto,
+    fmt::Debug,
     sync::{
         atomic::{AtomicBool, Ordering::SeqCst},
         Arc,
@@ -32,62 +33,30 @@ struct SandboxState {
 }
 
 impl SandboxState {
-    fn process_flag(&self, ch: u8) -> Result<(), Error> {
-        match ch {
-            b'c' => {
+    fn process_flag(&self, ev: Event) {
+        match ev {
+            Event::CpuTle => {
                 self.was_cpu_tle.store(true, SeqCst);
             }
-            b'r' => {
+            Event::RealTle => {
                 self.was_wall_tle.store(true, SeqCst);
             }
-            _ => return Err(Error::SandboxMisbehavior { cause: None }),
-        }
-        Ok(())
-    }
-
-    fn snapshot(&self) -> Self {
-        SandboxState {
-            was_cpu_tle: AtomicBool::new(self.was_cpu_tle.load(SeqCst)),
-            was_wall_tle: AtomicBool::new(self.was_wall_tle.load(SeqCst)),
+            Event::Heartbeat => {}
         }
     }
 }
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct LinuxSandbox {
     id: String,
     options: SandboxOptions,
     zygote_sock: Mutex<Socket>,
     zygote_pid: Pid,
     state: SandboxState,
-    watchdog_chan: Mutex<LinuxReadPipe>,
+    watchdog_chan: crossbeam_channel::Receiver<Event>,
     cgroup_driver: Arc<crate::linux::cgroup::Driver>,
     dealloc_uid: Option<(Arc<UidAllocator>, u32)>,
-}
-
-#[derive(Debug)]
-struct LinuxSandboxDebugHelper<'a> {
-    id: &'a str,
-    options: &'a SandboxOptions,
-    zygote_sock: RawFd,
-    zygote_pid: Pid,
-    state: SandboxState,
-    watchdog_chan: RawFd,
-}
-
-impl Debug for LinuxSandbox {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let h = LinuxSandboxDebugHelper {
-            id: &self.id,
-            options: &self.options,
-            zygote_sock: self.zygote_sock.lock().inner().as_raw(),
-            zygote_pid: self.zygote_pid,
-            watchdog_chan: self.watchdog_chan.lock().inner().as_raw(),
-            state: self.state.snapshot(),
-        };
-
-        h.fmt(f)
-    }
 }
 
 impl Sandbox for LinuxSandbox {
@@ -98,18 +67,17 @@ impl Sandbox for LinuxSandbox {
     }
 
     fn check_cpu_tle(&self) -> Result<bool, Error> {
-        self.poll_state()?;
+        self.poll_state();
         Ok(self.state.was_cpu_tle.load(SeqCst))
     }
 
     fn check_real_tle(&self) -> Result<bool, Error> {
-        self.poll_state()?;
+        self.poll_state();
         Ok(self.state.was_wall_tle.load(SeqCst))
     }
 
     fn kill(&self) -> Result<(), Error> {
-        jail_common::kill_sandbox(self.zygote_pid, &self.id, &self.cgroup_driver)
-            .map_err(|err| Error::Io { cause: err })?;
+        jail_common::kill_sandbox(self.zygote_pid);
         Ok(())
     }
 
@@ -150,27 +118,10 @@ pub(crate) struct ExtendedJobQuery {
 }
 
 impl LinuxSandbox {
-    fn poll_state(&self) -> Result<(), Error> {
-        let mut chan = self.watchdog_chan.lock();
-        for _ in 0..5 {
-            let mut buf = [0; 4];
-            let num_read = chan.read(&mut buf).or_else(|err| {
-                if let Some(errno) = err.raw_os_error() {
-                    if errno == libc::EAGAIN {
-                        return Ok(0);
-                    }
-                }
-                Err(err)
-            })?;
-            if num_read == 0 {
-                break;
-            }
-            for ch in &buf[..num_read] {
-                self.state.process_flag(*ch)?;
-            }
+    fn poll_state(&self) {
+        while let Ok(ev) = self.watchdog_chan.try_recv() {
+            self.state.process_flag(ev);
         }
-
-        Ok(())
     }
 
     pub(in crate::linux) unsafe fn create(
@@ -180,9 +131,6 @@ impl LinuxSandbox {
         uid_alloc: Arc<UidAllocator>,
     ) -> Result<LinuxSandbox, Error> {
         let jail_id = jail_common::gen_jail_id();
-        let (tx, rx) = setup_pipe()?;
-        rx.inner()
-            .fcntl(nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK))?;
 
         let shared_items = options
             .shared_items
@@ -214,25 +162,41 @@ impl LinuxSandbox {
             isolation_root: options.isolation_root.clone(),
             shared_items,
             jail_id: jail_id.clone(),
-            watchdog_chan: tx.into_inner().into_raw(),
             allow_mount_ns_failure: settings.allow_unsupported_mount_namespace,
             sandbox_uid,
         };
         let startup_info = zygote::start_zygote(jail_options, &cgroup_driver)?;
 
+        let (watchdog_tx, watchdog_rx) = crossbeam_channel::unbounded();
         let sandbox = LinuxSandbox {
-            id: jail_id,
-            options,
+            id: jail_id.clone(),
+            options: options.clone(),
             zygote_sock: Mutex::new(startup_info.socket),
             zygote_pid: startup_info.zygote_pid,
             state: SandboxState {
                 was_cpu_tle: AtomicBool::new(false),
                 was_wall_tle: AtomicBool::new(false),
             },
-            watchdog_chan: Mutex::new(rx),
-            cgroup_driver,
+            watchdog_chan: watchdog_rx,
+            cgroup_driver: cgroup_driver.clone(),
             dealloc_uid: uid_alloc.map(|uid_alloc| (uid_alloc, sandbox_uid)),
         };
+        tokio::task::spawn(watchdog(
+            jail_id,
+            options
+                .cpu_time_limit
+                .as_nanos()
+                .try_into()
+                .expect("too big cpu time limit"),
+            options
+                .real_time_limit
+                .as_nanos()
+                .try_into()
+                .expect("too big real time limit"),
+            watchdog_tx,
+            cgroup_driver,
+            startup_info.zygote_pid,
+        ));
 
         Ok(sandbox)
     }

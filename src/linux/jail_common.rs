@@ -4,7 +4,7 @@ use crate::{
 };
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
-use std::{ffi::OsString, os::unix::io::RawFd, path::PathBuf, time::Duration};
+use std::{ffi::OsString, path::PathBuf, time::Duration};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct JailOptions {
@@ -18,7 +18,6 @@ pub(crate) struct JailOptions {
     pub(crate) isolation_root: PathBuf,
     pub(crate) shared_items: Vec<LinuxSharedItem>,
     pub(crate) jail_id: String,
-    pub(crate) watchdog_chan: RawFd,
     pub(crate) allow_mount_ns_failure: bool,
     pub(crate) sandbox_uid: u32,
 }
@@ -93,32 +92,9 @@ fn send_term_signals(target_pid: Pid) {
     }
 }
 
-/// Kills sandbox where current process is executed
-pub(crate) fn kill_this_sandbox() -> ! {
-    send_term_signals(1);
-    // now let's wait until kernel kills us
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
-}
-
 /// Kills sandbox by zygote pid and cgroup_id
-pub(in crate::linux) fn kill_sandbox(
-    zygote_pid: Pid,
-    cgroup_id: &str,
-    cgroup_driver: &crate::linux::cgroup::Driver,
-) -> std::io::Result<()> {
+pub(in crate::linux) fn kill_sandbox(zygote_pid: Pid) {
     // We will kill zygote, and
     // kernel will kill all other processes by itself.
     send_term_signals(zygote_pid);
-    // now let's wait until kill is done
-    let pids_tasks_file_path = cgroup_driver.get_cgroup_tasks_file_path(cgroup_id);
-    loop {
-        let buf = std::fs::read(&pids_tasks_file_path)?;
-        let has_some = buf.iter().take(8).any(|c| c.is_ascii_digit());
-        if !has_some {
-            break;
-        }
-    }
-    Ok(())
 }
