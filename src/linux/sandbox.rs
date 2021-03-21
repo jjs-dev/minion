@@ -46,13 +46,26 @@ impl SandboxState {
     }
 }
 
+#[derive(Debug)]
+struct ZygoteInfo {
+    sock: Socket,
+    pid: Pid,
+}
+
+impl Drop for ZygoteInfo {
+    fn drop(&mut self) {
+        // We will kill zygote, and
+        // kernel will kill all other processes by itself.
+        send_term_signals(self.pid);
+    }
+}
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct LinuxSandbox {
     id: String,
     options: SandboxOptions,
-    zygote_sock: Mutex<Socket>,
-    zygote_pid: Pid,
+    zygote: Arc<Mutex<Option<ZygoteInfo>>>,
     state: SandboxState,
     watchdog_chan: crossbeam_channel::Receiver<Event>,
     cgroup_driver: Arc<crate::linux::cgroup::Driver>,
@@ -77,7 +90,7 @@ impl Sandbox for LinuxSandbox {
     }
 
     fn kill(&self) -> Result<(), Error> {
-        jail_common::kill_sandbox(self.zygote_pid);
+        self.zygote.lock().take();
         Ok(())
     }
 
@@ -122,6 +135,12 @@ impl LinuxSandbox {
         while let Ok(ev) = self.watchdog_chan.try_recv() {
             self.state.process_flag(ev);
         }
+    }
+
+    fn with_zygote<R>(&self, f: impl FnOnce(&mut ZygoteInfo) -> R) -> Option<R> {
+        let mut z = self.zygote.lock();
+        let z = &mut *z;
+        z.as_mut().map(f)
     }
 
     pub(in crate::linux) unsafe fn create(
@@ -171,8 +190,10 @@ impl LinuxSandbox {
         let sandbox = LinuxSandbox {
             id: jail_id.clone(),
             options: options.clone(),
-            zygote_sock: Mutex::new(startup_info.socket),
-            zygote_pid: startup_info.zygote_pid,
+            zygote: Arc::new(Mutex::new(Some(ZygoteInfo {
+                sock: startup_info.socket,
+                pid: startup_info.zygote_pid,
+            }))),
             state: SandboxState {
                 was_cpu_tle: AtomicBool::new(false),
                 was_wall_tle: AtomicBool::new(false),
@@ -195,7 +216,7 @@ impl LinuxSandbox {
                 .expect("too big real time limit"),
             watchdog_tx,
             cgroup_driver,
-            startup_info.zygote_pid,
+            sandbox.zygote.clone(),
         ));
 
         Ok(sandbox)
@@ -207,29 +228,31 @@ impl LinuxSandbox {
     ) -> Result<(jail_common::JobStartupInfo, Fd), Error> {
         let q = jail_common::Query::Spawn(query.job_query.clone());
 
-        let mut sock = self.zygote_sock.lock();
+        self.with_zygote(|zyg| {
+            zyg.sock.send(&q)?;
 
-        // note that we ignore errors, because zygote can be already killed for some reason
-        sock.send(&q).ok();
-
-        let fds = vec![query.stdin, query.stdout, query.stderr]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-        sock.send_fds(&fds)?;
-        let job_startup_info = sock.recv()?;
-        let fd = sock.recv_fds(1)?;
-        Ok((job_startup_info, fd.into_iter().next().unwrap()))
+            let fds = vec![query.stdin, query.stdout, query.stderr]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+            zyg.sock.send_fds(&fds)?;
+            let job_startup_info = zyg.sock.recv()?;
+            let fd = zyg.sock.recv_fds(1)?;
+            Ok((job_startup_info, fd.into_iter().next().unwrap()))
+        })
+        .unwrap_or(Err(Error::SandboxGone))
     }
 
     pub(crate) fn get_exit_code(&self, pid: Pid) -> ExitCode {
-        let q = jail_common::Query::GetExitCode(jail_common::GetExitCodeQuery { pid });
-        let mut sock = self.zygote_sock.lock();
-        sock.send(&q).ok();
-        match sock.recv::<i32>() {
-            Ok(ec) => ExitCode(ec.into()),
-            Err(_) => crate::ExitCode::KILLED,
-        }
+        self.with_zygote(|zyg| {
+            let q = jail_common::Query::GetExitCode(jail_common::GetExitCodeQuery { pid });
+            zyg.sock.send(&q).ok();
+            match zyg.sock.recv::<i64>() {
+                Ok(ec) => ExitCode(ec),
+                Err(_) => crate::ExitCode::KILLED,
+            }
+        })
+        .unwrap_or(crate::ExitCode::KILLED)
     }
 }
 
@@ -250,5 +273,16 @@ impl Drop for LinuxSandbox {
             self.cgroup_driver
                 .drop_cgroup(&self.id, &["pids", "memory", "cpuacct"]);
         }
+    }
+}
+
+fn send_term_signals(target_pid: Pid) {
+    // TODO: maybe SIGKILL is enough?
+    for &sig in &[
+        nix::sys::signal::SIGKILL,
+        nix::sys::signal::SIGTERM,
+        nix::sys::signal::SIGABRT,
+    ] {
+        nix::sys::signal::kill(nix::unistd::Pid::from_raw(target_pid), sig).ok();
     }
 }

@@ -1,5 +1,6 @@
-use crate::linux::util::Pid;
+use crate::linux::sandbox::ZygoteInfo;
 use crossbeam_channel::TrySendError;
+use parking_lot::Mutex;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -14,14 +15,14 @@ pub(super) enum Event {
 
 /// Monitors a sandbox, kills processes which used all their CPU time limit.
 /// Limits are given in nanoseconds
-#[tracing::instrument(skip(cpu_time_limit, real_time_limit, chan, driver, zygote_pid))]
+#[tracing::instrument(skip(cpu_time_limit, real_time_limit, chan, driver, zygote))]
 pub(super) async fn watchdog(
     jail_id: String,
     cpu_time_limit: u64,
     real_time_limit: u64,
     chan: crossbeam_channel::Sender<Event>,
     driver: Arc<crate::linux::cgroup::Driver>,
-    zygote_pid: Pid,
+    zygote: Arc<Mutex<Option<ZygoteInfo>>>,
 ) {
     let start = Instant::now();
     loop {
@@ -44,6 +45,7 @@ pub(super) async fn watchdog(
         let jail_id = jail_id.clone();
         let chan = chan.clone();
         let span = tracing::Span::current();
+        let zygote = zygote.clone();
         let exited = tokio::task::spawn_blocking(move || {
             let _enter = span.enter();
             let elapsed = Instant::now().duration_since(start);
@@ -79,8 +81,12 @@ pub(super) async fn watchdog(
                 );
                 let _ = chan.send(Event::RealTle);
             }
-            tracing::info!(pid = zygote_pid, "Killing sandbox");
-            crate::linux::jail_common::kill_sandbox(zygote_pid);
+            let mut zyg = zygote.lock();
+            {
+                let zyg = zyg.as_ref();
+                tracing::info!(pid = zyg.map_or(-1, |z| z.pid), "Killing sandbox");
+            }
+            zyg.take();
             true
         })
         .await

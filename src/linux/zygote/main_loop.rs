@@ -16,7 +16,6 @@ use std::io::Write;
 pub(crate) struct ReturnCode(i32);
 
 impl ReturnCode {
-    const OK: ReturnCode = ReturnCode(0);
     const BAD_QUERY: ReturnCode = ReturnCode(0xBAD);
 
     pub(crate) fn get(self) -> i32 {
@@ -120,7 +119,7 @@ impl Zygote<'_, '_> {
             self.tasks.swap_remove(pos)
         };
         if let Some(code) = task.exit_code {
-            self.options.sock.send(&code)?;
+            self.options.sock.send::<i64>(&(code as i64))?;
             return Ok(());
         }
         let wait_status = nix::sys::wait::waitpid(
@@ -128,11 +127,13 @@ impl Zygote<'_, '_> {
             Some(WaitPidFlag::WNOHANG),
         )?;
         match wait_status {
-            WaitStatus::Exited(_, exit_code) => self.options.sock.send(&exit_code)?,
+            WaitStatus::Exited(_, exit_code) => {
+                self.options.sock.send::<i64>(&(exit_code as i64))?
+            }
             WaitStatus::Signaled(_, signal, _coredump) => self
                 .options
                 .sock
-                .send(&(signal as i64 + crate::ExitCode::SIGNALLED.0))?,
+                .send::<i64>(&(signal as i64 + crate::ExitCode::SIGNALLED.0))?,
             other => unreachable!("unexpected WaitStatus: {:?}", other),
         };
         Ok(())
@@ -188,7 +189,6 @@ impl Zygote<'_, '_> {
         };
         match query {
             Query::Spawn(ref opts) => self.process_spawn_query(opts),
-            Query::Exit => return Ok(Some(ReturnCode::OK)),
             Query::GetExitCode(query) => self.process_get_exit_code_query(query.pid)?,
         };
         Ok(None)
