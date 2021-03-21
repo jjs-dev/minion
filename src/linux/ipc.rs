@@ -1,7 +1,6 @@
 //! Defines IPC utilities.
 //! Currently we  `nix` directly but we will switch to std/tokio when
 //! std APIs for fd passing are stable
-// TODO: defend against DoS
 use crate::linux::fd::Fd;
 use nix::sys::{
     socket::{
@@ -11,6 +10,11 @@ use nix::sys::{
     uio::IoVec,
 };
 use serde::{de::DeserializeOwned, Serialize};
+use std::{
+    any::TypeId,
+    hash::{Hash, Hasher},
+    io::Write,
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum IpcError {
@@ -44,26 +48,41 @@ impl Socket {
         &self.fd
     }
 
-    pub fn send<T: Serialize>(&mut self, message: &T) -> Result<(), IpcError> {
+    pub fn send<T: Serialize + 'static>(&mut self, message: &T) -> Result<(), IpcError> {
         let message = serde_json::to_vec(&message)?;
         let len = (message.len()).to_ne_bytes();
+        let id = typeid::<T>().to_ne_bytes();
 
         let iov_len = IoVec::from_slice(&len);
+        let iov_id = IoVec::from_slice(&id);
         let iov_data = IoVec::from_slice(&message);
-        sendmsg(self.fd.as_raw(), &[iov_len], &[], MsgFlags::empty(), None)?;
+        sendmsg(
+            self.fd.as_raw(),
+            &[iov_len, iov_id],
+            &[],
+            MsgFlags::empty(),
+            None,
+        )?;
         sendmsg(self.fd.as_raw(), &[iov_data], &[], MsgFlags::empty(), None)?;
         Ok(())
     }
 
-    pub fn recv<T: DeserializeOwned>(&mut self) -> Result<T, IpcError> {
+    pub fn recv<T: DeserializeOwned + 'static>(&mut self) -> Result<T, IpcError> {
         let mut len = [0; 8];
+        let mut id = [0; 8];
         recvmsg(
             self.fd.as_raw(),
-            &[IoVec::from_mut_slice(&mut len)],
+            &[
+                IoVec::from_mut_slice(&mut len),
+                IoVec::from_mut_slice(&mut id),
+            ],
             None,
             MsgFlags::empty(),
         )?;
         let len = usize::from_ne_bytes(len);
+        let id = u64::from_ne_bytes(id);
+
+        assert_eq!(id, typeid::<T>());
 
         let mut message = vec![0; len];
         recvmsg(
@@ -115,4 +134,15 @@ impl Socket {
             _ => Err(IpcError::Ancillary),
         }
     }
+}
+
+fn typeid<T: 'static>() -> u64 {
+    let t = TypeId::of::<T>();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    t.hash(&mut h);
+    let id = h.finish();
+
+    let mut logger = crate::linux::util::strace_logger();
+    writeln!(logger, "{} -> {}", std::any::type_name::<T>(), id).unwrap();
+    id
 }
