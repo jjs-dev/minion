@@ -14,12 +14,13 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
         .find(|&tc| tc.name() == test_case_name)
         .unwrap();
 
+    let profile = std::env::var("PROFILE").unwrap();
+
     let resource_driver = {
-        let name = std::env::var("DRIVER").unwrap();
-        match name.as_str() {
+        match profile.as_str() {
             "cgroup-v1" => minion::linux::ResourceDriverKind::CgroupV1,
             "cgroup-v2" => minion::linux::ResourceDriverKind::CgroupV2,
-            "prlimit" => minion::linux::ResourceDriverKind::Prlimit,
+            "prlimit" | "prlimit-rootless" => minion::linux::ResourceDriverKind::Prlimit,
             _ => unreachable!(),
         }
     };
@@ -27,6 +28,9 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
     let tempdir = tempfile::TempDir::new().expect("cannot create temporary dir");
     let mut settings = minion::linux::Settings::new();
     settings.resource_drivers = vec![resource_driver];
+    if profile == "prlimit-rootless" {
+        settings.rootless = true;
+    }
     {
         let mut res = minion::CheckResult::new();
         minion::linux::check::check(&settings, &mut res);

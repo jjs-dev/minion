@@ -50,8 +50,11 @@ jobs:
           rustup target add x86_64-unknown-linux-musl
       - uses: actions/cache@v2
         with:
-          path: ./target
-          key: ${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ./target
+          key: ${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-inv1
       - name: Build tests (musl)
         run: |
           mkdir -p ./tests/x86_64-unknown-linux-musl
@@ -68,12 +71,6 @@ jobs:
         os:
           - "ubuntu-20.04"
           - "macos-latest"
-        rust-target:
-          - "x86_64-unknown-linux-musl"
-        driver:
-          - "cgroup-v1"
-          - "cgroup-v2"
-          - "prlimit"
     runs-on: ${{ matrix.os }}
     needs:
       - tests-linux-build
@@ -88,8 +85,6 @@ jobs:
           bash ci/linux.sh
         timeout-minutes: 5
         env:
-          CI_TARGET: ${{ matrix.rust-target }}
-          CI_DRIVER: ${{ matrix.driver }}
           CI_OS: ${{ matrix.os }}
       - name: Collect logs
         if: always()
@@ -100,7 +95,7 @@ jobs:
         if: always()
         with:
           path: /tmp/logs
-          name: tests-trace-${{ matrix.driver }}-${{ matrix.os }}
+          name: tests-trace-${{ matrix.os }}
 
   nightly-checks:
     runs-on: ubuntu-20.04
