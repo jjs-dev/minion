@@ -26,11 +26,11 @@ pub fn main(test_cases: &[&'static dyn TestCase]) {
         )
         .arg(clap::Arg::new("trace").long("trace").takes_value(false))
         .arg(
-            clap::Arg::new("resource-driver")
-                .long("resource-driver")
-                .possible_values(&["cgroup-v1", "cgroup-v2", "prlimit"])
-                .required(true)
-                .takes_value(true),
+            clap::Arg::new("profile")
+                .long("profile")
+                .possible_values(&["cgroup-v1", "cgroup-v2", "prlimit", "prlimit-rootless"])
+                .multiple(true)
+                .required(true),
         )
         .get_matches();
     check_static();
@@ -41,11 +41,17 @@ pub fn main(test_cases: &[&'static dyn TestCase]) {
         .copied()
         .filter(|&tc| filter(tc))
         .collect();
-    let opts = ExecuteOptions {
-        trace: matches.is_present("trace"),
-        driver: matches.value_of("resource-driver").unwrap().to_string(),
-    };
-    let outcome = execute_tests(&filtered_test_cases, opts);
+    let profiles = matches.values_of("profile").unwrap();
+    let mut outcome = Outcome::Success;
+    for profile in profiles {
+        println!("------ running tests for profile {} ------", profile);
+
+        let opts = ExecuteOptions {
+            trace: matches.is_present("trace"),
+            profile: profile.to_string(),
+        };
+        outcome = outcome.and(execute_tests(&filtered_test_cases, opts));
+    }
     println!("------ execution done ------");
     match outcome {
         Outcome::Success => println!("tests succeeded"),
@@ -59,7 +65,7 @@ pub fn main(test_cases: &[&'static dyn TestCase]) {
 #[derive(Clone)]
 struct ExecuteOptions {
     trace: bool,
-    driver: String,
+    profile: String,
 }
 
 fn execute_tests(test_cases: &[&dyn TestCase], exec_opts: ExecuteOptions) -> Outcome {
@@ -90,7 +96,7 @@ fn execute_single_test(case: &dyn TestCase, exec_opts: &ExecuteOptions) -> Outco
     };
 
     cmd.env_clear();
-    cmd.env("DRIVER", &exec_opts.driver);
+    cmd.env("PROFILE", &exec_opts.profile);
     cmd.env(crate::WORKER_ENV_NAME, "1");
     cmd.env("TEST", case.name());
     cmd.env("RUST_BACKTRACE", "full");
