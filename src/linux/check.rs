@@ -8,7 +8,10 @@ pub fn check(settings: &crate::linux::Settings, res: &mut crate::check::CheckRes
         res.warning("PID file descriptors not supported")
     }
     if let Err(err) = Driver::new(settings) {
-        res.error(&format!("Cgroup failure: {:#}", err));
+        res.error(&format!(
+            "Resource limits failure: {:#}",
+            anyhow::Error::new(err)
+        ));
     }
     if !settings.rootless {
         check_uid(settings, res);

@@ -8,7 +8,7 @@ use self::{cgroup_common::CgroupEnter, prlimit::PrlimitEnter};
 use crate::linux::{jail_common::ZygoteInfo, Error, ResourceDriverKind, Settings};
 use parking_lot::Mutex;
 use rand::Rng;
-use std::{collections::HashMap, fmt, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, error::Error as _, fmt, path::PathBuf, sync::Arc};
 
 /// See ResourceUsageData for docs.
 #[derive(Debug, Copy, Clone, Default)]
@@ -65,7 +65,7 @@ fn smoke_check<R: ResourceLimitImpl>(imp: &R) -> Result<(), Error> {
             &group_id,
             &ResourceLimits {
                 memory_max: 1 << 30,
-                pids_max: 1024,
+                pids_max: 1,
                 cpu_usage: 1_000_000_000,
             },
         )
@@ -130,7 +130,12 @@ pub struct DriverInitializationError {
 impl fmt::Display for DriverInitializationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (settings, error) in &self.attempts {
-            writeln!(f, "Tried {:?}, got: {:#}", settings, error)?;
+            let mut err = error.source();
+            writeln!(f, "Tried {:?}, got: {}", settings, error)?;
+            while let Some(e) = err {
+                writeln!(f, "\tCaused by {}", e)?;
+                err = e.source();
+            }
         }
         Ok(())
     }

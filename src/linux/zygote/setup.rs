@@ -192,7 +192,9 @@ pub(in crate::linux) fn setup(
         // lock until uids are mapped
         uid_mapping_done.read(&mut [0])?;
     }
-    configure_dir(&jail_params.isolation_root)?;
+    if jail_params.sandbox_uid.is_some() {
+        configure_dir(&jail_params.isolation_root)?;
+    }
     setup_expositions(&jail_params);
     setup_procfs(&jail_params)?;
     setup_chroot(&jail_params)?;

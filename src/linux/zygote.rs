@@ -69,6 +69,7 @@ struct DoExecArg<'a> {
     pwd: &'a OsStr,
     enter_handle: crate::linux::limits::OpaqueEnterHandle,
     jail_id: &'a str,
+    setuid: bool,
 }
 
 fn duplicate_string_list(v: &[OsString]) -> *mut *mut c_char {
@@ -183,12 +184,14 @@ fn do_exec(arg: DoExecArg) -> ! {
             // It is not error from security PoV if chdir failed: chroot isolation works even if current dir is outside of chroot.
         }
 
-        if libc::setgid(SANDBOX_INTERNAL_UID as u32) != 0 {
-            err_exit("setgid");
-        }
+        if arg.setuid {
+            if libc::setgid(SANDBOX_INTERNAL_UID as u32) != 0 {
+                err_exit("setgid");
+            }
 
-        if libc::setuid(SANDBOX_INTERNAL_UID as u32) != 0 {
-            err_exit("setuid");
+            if libc::setuid(SANDBOX_INTERNAL_UID as u32) != 0 {
+                err_exit("setuid");
+            }
         }
 
         // Call dup2 as late as possible for all panics to write to normal stdio instead of pipes.
@@ -227,6 +230,7 @@ fn do_exec(arg: DoExecArg) -> ! {
 fn spawn_job(
     options: JobOptions,
     jail_id: String,
+    setuid: bool,
     resource_group_enter_handle: crate::linux::limits::OpaqueEnterHandle,
 ) -> Result<jail_common::JobStartupInfo, Error> {
     // `dea` will be passed to child process
@@ -238,6 +242,7 @@ fn spawn_job(
         pwd: &options.pwd,
         enter_handle: resource_group_enter_handle,
         jail_id: &jail_id,
+        setuid,
     };
     let res = unsafe { nix::unistd::fork() }?;
     let child_pid = match res {
@@ -318,12 +323,18 @@ fn start_zygote_caller(
         assert_eq!(len, 4);
     }
     let zygote_pid = i32::from_ne_bytes(zygote_pid);
-    let mapping = format!(
-        "0 {} 1\n{} {} 1",
-        nix::unistd::Uid::effective().as_raw(),
-        SANDBOX_INTERNAL_UID,
-        jail_options.sandbox_uid
-    );
+
+    let mapping = match jail_options.sandbox_uid {
+        Some(separate_user) => format!(
+            "0 {} 1\n{} {} 1",
+            nix::unistd::Uid::effective().as_raw(),
+            SANDBOX_INTERNAL_UID,
+            separate_user
+        ),
+        None => {
+            format!("0 {} 1", nix::unistd::Uid::effective().as_raw())
+        }
+    };
     let uid_map_path = format!("/proc/{}/uid_map", zygote_pid);
     let gid_map_path = format!("/proc/{}/gid_map", zygote_pid);
     let setgroups_path = format!("/proc/{}/setgroups", zygote_pid);

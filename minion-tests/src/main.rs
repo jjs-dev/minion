@@ -58,6 +58,10 @@ pub trait TestCase: Send + Sync {
     fn process_count_limit(&self) -> u32 {
         1
     }
+    /// If this method returns false, test is skipped
+    fn filter(&self, _profile: &str) -> bool {
+        true
+    }
 }
 
 static WORKER_ENV_NAME: &str = "__MINION_ROLE_IS_WORKER__";
