@@ -49,7 +49,7 @@ TEST_BIN=./tests/x86_64-unknown-linux-musl/minion-tests
 chmod +x $TEST_BIN
 if [[ $CI_OS == "ubuntu-20.04" ]]; then
   # TODO: actually run rootless without root
-  PROFILES="cgroup-v1 prlimit"
+  PROFILES="cgroup-v1 prlimit prlimit-rootless"
 fi 
 if [[ $CI_OS == "macos-latest" ]]; then
   PROFILES="cgroup-v2"

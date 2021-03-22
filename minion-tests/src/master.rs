@@ -36,15 +36,16 @@ pub fn main(test_cases: &[&'static dyn TestCase]) {
     check_static();
 
     let filter = get_filter(&matches);
-    let filtered_test_cases: Vec<_> = test_cases
-        .iter()
-        .copied()
-        .filter(|&tc| filter(tc))
-        .collect();
     let profiles = matches.values_of("profile").unwrap();
     let mut outcome = Outcome::Success;
     for profile in profiles {
         println!("------ running tests for profile {} ------", profile);
+
+        let filtered_test_cases: Vec<_> = test_cases
+            .iter()
+            .copied()
+            .filter(|&tc| filter(tc) && tc.filter(profile))
+            .collect();
 
         let opts = ExecuteOptions {
             trace: matches.is_present("trace"),
@@ -88,7 +89,11 @@ fn execute_single_test(case: &dyn TestCase, exec_opts: &ExecuteOptions) -> Outco
         let mut cmd = std::process::Command::new("strace");
         cmd.arg("-f"); // follow forks
         cmd.arg("-s").arg("128"); // print longer string prefixes
-        cmd.arg("-o").arg(format!("strace-log-{}.txt", case.name()));
+        cmd.arg("-o").arg(format!(
+            "strace-log-{}-{}.txt",
+            exec_opts.profile,
+            case.name()
+        ));
         cmd.arg(self_exe);
         cmd
     } else {

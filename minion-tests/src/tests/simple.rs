@@ -64,6 +64,10 @@ impl crate::TestCase for TTlFork {
     fn process_count_limit(&self) -> u32 {
         2
     }
+    fn filter(&self, profile: &str) -> bool {
+        // we will not be able to spawn two processes
+        profile != "prlimit-rootless"
+    }
 }
 
 pub(crate) struct TIdle;
@@ -180,6 +184,10 @@ impl crate::TestCase for TSecurity {
         super::assert_exit_code(cp.by_ref(), minion::ExitCode(24));
         super::assert_empty(cp.stdout);
         super::assert_empty(cp.stderr);
+    }
+    fn filter(&self, profile: &str) -> bool {
+        // FIXME
+        profile != "prlimit-rootless"
     }
 }
 

@@ -19,7 +19,7 @@ pub(crate) struct JailOptions {
     pub(crate) shared_items: Vec<LinuxSharedItem>,
     pub(crate) jail_id: String,
     pub(crate) allow_mount_ns_failure: bool,
-    pub(crate) sandbox_uid: u32,
+    pub(crate) sandbox_uid: Option<u32>,
     pub(crate) enable_watchdog: bool,
 }
 

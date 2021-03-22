@@ -30,7 +30,7 @@ pub enum Error {
     },
     #[error("unknown error")]
     Unknown,
-    #[error("failed to select esource limit implementation")]
+    #[error("failed to select resource limit implementation")]
     SelectDriverImpl {
         #[from]
         cause: DriverInitializationError,

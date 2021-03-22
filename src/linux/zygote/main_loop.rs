@@ -75,6 +75,7 @@ impl Zygote<'_, '_> {
         let startup_info = spawn_job(
             job_options,
             self.options.jail_options.jail_id.clone(),
+            self.options.jail_options.sandbox_uid.is_some(),
             self.resource_group_enter_handle.clone(),
         )
         .expect("failed to create child");

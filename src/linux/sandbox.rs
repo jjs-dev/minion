@@ -143,20 +143,14 @@ impl LinuxSandbox {
             .map(convert_shared_item)
             .collect::<Result<Vec<_>, _>>()?;
 
-        let (uid_alloc, sandbox_uid) = if settings.rootless {
-            (None, nix::unistd::Uid::effective().as_raw())
+        let sandbox_uid = if settings.rootless {
+            None
         } else {
-            (
-                Some(uid_alloc.clone()),
-                uid_alloc.allocate().ok_or(Error::UidExhausted)?,
-            )
-        };
+            let uid = uid_alloc.allocate().ok_or(Error::UidExhausted)?;
 
-        tracing::debug!(
-            unique = uid_alloc.is_some(),
-            uid = sandbox_uid,
-            "Selected sandbox_uid"
-        );
+            tracing::debug!(uid, "Allocated sandbox_uid");
+            Some(uid)
+        };
 
         let jail_options = jail_common::JailOptions {
             max_alive_process_count: options.max_alive_process_count,
@@ -203,7 +197,7 @@ impl LinuxSandbox {
             },
             watchdog_chan: watchdog_rx,
             driver: driver.clone(),
-            dealloc_uid: uid_alloc.map(|uid_alloc| (uid_alloc, sandbox_uid)),
+            dealloc_uid: sandbox_uid.map(|sandbox_uid| (uid_alloc, sandbox_uid)),
         };
         tokio::task::spawn(watchdog(
             jail_id,
