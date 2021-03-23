@@ -22,6 +22,8 @@ use std::{
     },
 };
 
+use super::seccomp::Seccomp;
+
 /// Bits which are reported by time watcher
 #[derive(Debug)]
 #[repr(C)]
@@ -152,6 +154,8 @@ impl LinuxSandbox {
             Some(uid)
         };
 
+        let seccomp = Seccomp::new(&settings.seccomp);
+
         let jail_options = jail_common::JailOptions {
             max_alive_process_count: options.max_alive_process_count,
             memory_limit: options.memory_limit,
@@ -163,6 +167,7 @@ impl LinuxSandbox {
             allow_mount_ns_failure: settings.allow_unsupported_mount_namespace,
             sandbox_uid,
             enable_watchdog: driver.get_watchdog(),
+            seccomp,
         };
 
         let resource_group_enter_handle = driver.create_group(

@@ -7,6 +7,7 @@ mod jail_common;
 mod limits;
 mod pipe;
 mod sandbox;
+mod seccomp;
 mod uid_alloc;
 mod util;
 mod wait;
@@ -254,6 +255,29 @@ pub enum ResourceDriverKind {
     Auto { allow_dangerous: bool },
 }
 
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub enum SeccompPolicy {
+    /// Policy that allows all syscalls is be used.
+    Unrestricted,
+    /// Policy that disallows several possibly dangerous syscalls
+    /// is used. You should use this (or more restrictive policy)
+    /// when `rootless` is false.
+    ///
+    /// This is the default.
+    DenyDangerous,
+    /// Policy that disallows almost all syscalls
+    Pure,
+    /// Use provided policy
+    Manual { policy: Vec<u8> },
+}
+
+impl Default for SeccompPolicy {
+    fn default() -> Self {
+        SeccompPolicy::DenyDangerous
+    }
+}
+
 /// Allows some customization
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -267,23 +291,30 @@ pub struct Settings {
     pub resource_drivers: Vec<ResourceDriverKind>,
     /// Do not perform actions that require root access.
     /// Note that some other options may require root as well.
+    ///
+    /// When set to true, `seccomp` should not be set to
+    /// Unrestricted.
     pub rootless: bool,
     /// User identifiers to use for the sandboxes.
     /// Ignored in rootless mode (because calling process uid will be used
     /// instead). Also applies to GIDs
     pub uid: UserIdBounds,
+    /// Seccomp settings
+    pub seccomp: SeccompPolicy,
 }
 
 impl Default for Settings {
     fn default() -> Self {
+        let have_root = nix::unistd::Uid::effective().is_root();
         Settings {
             allow_unsupported_mount_namespace: false,
             cgroup: CgroupSettings::default(),
             resource_drivers: vec![ResourceDriverKind::Auto {
                 allow_dangerous: false,
             }],
-            rootless: !nix::unistd::Uid::effective().is_root(),
+            rootless: !have_root,
             uid: Default::default(),
+            seccomp: SeccompPolicy::default(),
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    linux::{ipc::Socket, util::Pid},
+    linux::{ipc::Socket, seccomp::Seccomp, util::Pid},
     SharedItemKind,
 };
 use rand::seq::SliceRandom;
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::{ffi::OsString, path::PathBuf, time::Duration};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct JailOptions {
+pub(in crate::linux) struct JailOptions {
     pub(crate) max_alive_process_count: u32,
     pub(crate) memory_limit: u64,
     /// Specifies total CPU time for whole sandbox.
@@ -21,6 +21,7 @@ pub(crate) struct JailOptions {
     pub(crate) allow_mount_ns_failure: bool,
     pub(crate) sandbox_uid: Option<u32>,
     pub(crate) enable_watchdog: bool,
+    pub(crate) seccomp: Seccomp,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

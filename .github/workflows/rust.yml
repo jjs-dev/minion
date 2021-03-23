@@ -111,3 +111,16 @@ jobs:
           cargo check --workspace
         env:
           RUSTFLAGS: -Wunused-crate-dependencies --cfg minion_nightly
+  codegen:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1.0.6
+        with:
+          toolchain: nightly
+          override: true
+      - name: Ensure that generated files are fresh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y seccomp libseccomp-dev
+          cargo run -p minion-codegen

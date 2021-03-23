@@ -5,6 +5,7 @@ status = [
 'tests-linux-run (ubuntu-20.04)',
 'tests-linux-run (macos-latest)',
 'nightly-checks',
+'codegen'
 ]
 delete-merged-branches = true
 timeout-sec = 900

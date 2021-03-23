@@ -1,0 +1,11 @@
+[package]
+name = "minion-codegen"
+version = "0.1.0"
+authors = ["Mikail Bagishov <bagishov.mikail@yandex.ru>"]
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0.39"
+libc = "0.2.91"
+seccomp = { git = "https://github.com/polachok/seccomp", branch = "master" }
+tempfile = "3.2.0"
