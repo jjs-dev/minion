@@ -77,6 +77,7 @@ impl Zygote<'_, '_> {
             self.options.jail_options.jail_id.clone(),
             self.options.jail_options.sandbox_uid.is_some(),
             self.resource_group_enter_handle.clone(),
+            &self.options.jail_options.seccomp,
         )
         .expect("failed to create child");
         writeln!(logger, "Job started, storing Task.").ok();

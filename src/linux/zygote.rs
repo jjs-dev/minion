@@ -10,6 +10,7 @@ use crate::linux::{
     fd::Fd,
     ipc::Socket,
     jail_common::{self, JailOptions, ZygoteStartupInfo},
+    seccomp::Seccomp,
     util::{duplicate_string, err_exit, Uid},
     Error,
 };
@@ -70,6 +71,7 @@ struct DoExecArg<'a> {
     enter_handle: crate::linux::limits::OpaqueEnterHandle,
     jail_id: &'a str,
     setuid: bool,
+    seccomp: &'a Seccomp,
 }
 
 fn duplicate_string_list(v: &[OsString]) -> *mut *mut c_char {
@@ -200,7 +202,14 @@ fn do_exec(arg: DoExecArg) -> ! {
         libc::dup2(arg.stdio.stderr.as_raw(), libc::STDERR_FILENO);
 
         let mut logger = crate::linux::util::StraceLogger::new();
-        writeln!(logger, "sandbox {}: ready to execve", arg.jail_id).unwrap();
+        writeln!(
+            logger,
+            "sandbox {}: ready to enable seccomp and execve",
+            arg.jail_id
+        )
+        .unwrap();
+
+        arg.seccomp.enable();
 
         libc::execvpe(
             path,
@@ -232,6 +241,7 @@ fn spawn_job(
     jail_id: String,
     setuid: bool,
     resource_group_enter_handle: crate::linux::limits::OpaqueEnterHandle,
+    seccomp: &Seccomp,
 ) -> Result<jail_common::JobStartupInfo, Error> {
     // `dea` will be passed to child process
     let dea = DoExecArg {
@@ -243,6 +253,7 @@ fn spawn_job(
         enter_handle: resource_group_enter_handle,
         jail_id: &jail_id,
         setuid,
+        seccomp: &seccomp,
     };
     let res = unsafe { nix::unistd::fork() }?;
     let child_pid = match res {
