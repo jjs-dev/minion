@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 minion = {path = ".."}
-libc = "0.2.86"
-tokio = { version = "1.2.0", features = ["macros", "rt"] }
-tracing-subscriber = "0.2.15"
+libc = "0.2.91"
+tokio = { version = "1.4.0", features = ["macros", "rt"] }
+tracing-subscriber = "0.2.17"
 clap = "3.0.0-beta.2"
