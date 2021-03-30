@@ -43,7 +43,13 @@ fn expose_item(
     flags: &SharedItemFlags,
 ) {
     let bind_target = jail_root.join(alias_path);
-    fs::create_dir_all(&bind_target).unwrap();
+    if let Err(e) = fs::create_dir_all(&bind_target) {
+        panic!(
+            "Failed to create bind target ({}): {}",
+            bind_target.display(),
+            e
+        );
+    }
     let stat = fs::metadata(&system_path)
         .unwrap_or_else(|err| panic!("failed to stat {}: {}", system_path.display(), err));
     if stat.is_file() {
