@@ -106,7 +106,7 @@ impl SandboxOptions {
     }
 
     fn postprocess(&mut self) {
-        let mut paths = std::mem::replace(&mut self.shared_items, Vec::new());
+        let mut paths = std::mem::take(&mut self.shared_items);
         for x in &mut paths {
             x.dest = self.make_relative(&x.dest).to_path_buf();
         }
