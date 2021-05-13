@@ -82,6 +82,15 @@ impl Sandbox for LinuxSandbox {
         Ok(())
     }
 
+    fn debug_info(&self) -> Result<serde_json::Value, Self::Error> {
+        let zygote_pid = self
+            .with_zygote(|z| z.pid)
+            .map_or(serde_json::Value::Null, |pid| serde_json::json!(pid));
+        Ok(serde_json::json!({
+            "zygotePid": zygote_pid,
+        }))
+    }
+
     fn resource_usage(&self) -> Result<ResourceUsageData, Error> {
         let usage = self.driver.resource_usage(&self.id)?;
         Ok(ResourceUsageData {
