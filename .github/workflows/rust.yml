@@ -110,7 +110,7 @@ jobs:
           rm -rf .cargo
           cargo check --workspace
         env:
-          RUSTFLAGS: -Wunused-crate-dependencies --cfg minion_nightly
+          RUSTFLAGS: -Wunused-crate-dependencies
   codegen:
     runs-on: ubuntu-20.04
     steps:

@@ -1,2 +1,2 @@
 [build]
-rustflags = ["-Wunused-crate-dependencies", "--cfg", "minion_nightly"]
+rustflags = ["-Wunused-crate-dependencies"]

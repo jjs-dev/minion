@@ -1,4 +1,4 @@
-#![cfg_attr(minion_nightly, warn(unsafe_op_in_unsafe_fn))]
+#![warn(unsafe_op_in_unsafe_fn)]
 use minion::{self};
 use std::{
     ffi::{CStr, OsStr, OsString},

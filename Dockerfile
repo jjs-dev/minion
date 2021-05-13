@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:experimental
-FROM rust:1.51-slim as builder
+FROM rust:1.52-slim as builder
 WORKDIR /work
 COPY src src
 COPY minion-cli minion-cli
