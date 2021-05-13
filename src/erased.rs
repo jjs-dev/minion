@@ -14,6 +14,7 @@ pub trait Sandbox: std::fmt::Debug + Send + Sync + 'static {
     fn check_real_tle(&self) -> anyhow::Result<bool>;
     fn kill(&self) -> anyhow::Result<()>;
     fn resource_usage(&self) -> anyhow::Result<crate::ResourceUsageData>;
+    fn debug_info(&self) -> anyhow::Result<serde_json::Value>;
     fn into_arc_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'static>;
 }
 
@@ -32,6 +33,9 @@ impl<S: crate::Sandbox> Sandbox for S {
     }
     fn resource_usage(&self) -> anyhow::Result<crate::ResourceUsageData> {
         self.resource_usage().map_err(Into::into)
+    }
+    fn debug_info(&self) -> anyhow::Result<serde_json::Value> {
+        self.debug_info().map_err(Into::into)
     }
     fn into_arc_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync + 'static> {
         self

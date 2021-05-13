@@ -129,6 +129,10 @@ pub trait Sandbox: Debug + Send + Sync + 'static {
     /// Probably, subsequent `spawn` requests will fail.
     fn kill(&self) -> Result<(), Self::Error>;
 
+    /// Returns debugging information, such as pathes or process
+    /// identifiers.
+    fn debug_info(&self) -> Result<serde_json::Value, Self::Error>;
+
     /// Returns information about resource usage by total sandbox
     fn resource_usage(&self) -> Result<ResourceUsageData, Self::Error>;
 }
