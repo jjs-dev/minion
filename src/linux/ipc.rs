@@ -31,7 +31,7 @@ pub struct Socket {
     fd: Fd,
 }
 
-const MAX_FD_COUNT: usize = 3;
+const FD_CHUNK_SIZE: usize = 8;
 
 impl Socket {
     pub fn pair() -> Result<(Self, Self), IpcError> {
@@ -96,43 +96,55 @@ impl Socket {
     }
 
     pub fn send_fds(&mut self, fds: &[Fd]) -> Result<(), IpcError> {
-        assert!(fds.len() <= MAX_FD_COUNT);
         let iov = IoVec::from_slice(b"_");
-        let raw_fds = fds.iter().map(|fd| fd.as_raw()).collect::<Vec<_>>();
 
-        sendmsg(
-            self.fd.as_raw(),
-            &[iov],
-            &[ControlMessage::ScmRights(&raw_fds)],
-            MsgFlags::empty(),
-            None,
-        )?;
+        let chunks = fds.chunks(FD_CHUNK_SIZE);
+        for chunk in chunks {
+            let mut raw_fds = [0; FD_CHUNK_SIZE];
+            for (i, x) in chunk.iter().enumerate() {
+                raw_fds[i] = x.as_raw();
+            }
+
+            sendmsg(
+                self.fd.as_raw(),
+                &[iov],
+                &[ControlMessage::ScmRights(&raw_fds[..chunk.len()])],
+                MsgFlags::empty(),
+                None,
+            )?;
+        }
         Ok(())
     }
 
     pub fn recv_fds(&mut self, fd_count: usize) -> Result<Vec<Fd>, IpcError> {
-        assert!(fd_count <= MAX_FD_COUNT);
+        let mut received = Vec::new();
+        received.resize_with(fd_count, || Fd::new(0));
         let mut buf = [0; 1];
-        let iov = IoVec::from_mut_slice(&mut buf);
-        let mut cmsg_space = nix::cmsg_space!([Fd; MAX_FD_COUNT]);
-        let msg = recvmsg(
-            self.fd.as_raw(),
-            &[iov],
-            Some(&mut cmsg_space),
-            MsgFlags::empty(),
-        )?;
-        let mut cmsgs = msg.cmsgs();
-        let next = cmsgs.next().ok_or(IpcError::Ancillary)?;
-        match next {
-            ControlMessageOwned::ScmRights(fds) => {
-                if fds.len() != fd_count {
-                    return Err(IpcError::Ancillary);
-                }
+        let mut cmsg_space = nix::cmsg_space!([Fd; FD_CHUNK_SIZE]);
 
-                Ok(fds.into_iter().map(Fd::new).collect())
+        for chunk in received.chunks_mut(FD_CHUNK_SIZE) {
+            let iov = IoVec::from_mut_slice(&mut buf);
+            let msg = recvmsg(
+                self.fd.as_raw(),
+                &[iov],
+                Some(&mut cmsg_space),
+                MsgFlags::empty(),
+            )?;
+            let mut cmsgs = msg.cmsgs();
+            let next = cmsgs.next().ok_or(IpcError::Ancillary)?;
+            match next {
+                ControlMessageOwned::ScmRights(fds) => {
+                    if fds.len() != chunk.len() {
+                        return Err(IpcError::Ancillary);
+                    }
+                    for (i, x) in fds.iter().enumerate() {
+                        chunk[i] = Fd::new(*x);
+                    }
+                }
+                _ => return Err(IpcError::Ancillary),
             }
-            _ => Err(IpcError::Ancillary),
         }
+        Ok(received)
     }
 }
 
