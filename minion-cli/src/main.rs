@@ -160,9 +160,9 @@ async fn main() {
             .map(|v| format!("{}={}", &v.name, &v.value).into())
             .collect(),
         stdio: minion::StdioSpecification {
-            stdin: minion::InputSpecification::handle(stdin_fd),
-            stdout: minion::OutputSpecification::handle(stdout_fd),
-            stderr: minion::OutputSpecification::handle(stderr_fd),
+            stdin: minion::InputSpecification::handle(minion::Handle::new(stdin_fd)),
+            stdout: minion::OutputSpecification::handle(minion::Handle::new(stdout_fd)),
+            stderr: minion::OutputSpecification::handle(minion::Handle::new(stderr_fd)),
         },
         pwd: options.pwd.into(),
     };

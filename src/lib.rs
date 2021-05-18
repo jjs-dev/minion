@@ -138,16 +138,36 @@ pub trait Sandbox: Debug + Send + Sync + 'static {
     fn resource_usage(&self) -> Result<ResourceUsageData, Self::Error>;
 }
 
+/// Kernel object descriptor.
+#[derive(Debug)]
+pub struct Handle(pub(crate) u64);
+
+impl Handle {
+    /// # Correctness
+    /// - Handle must not be used since passing to this function unless created
+    ///   handle instance is left unused
+    /// - Handle must be valid
+    pub fn new(h: u64) -> Self {
+        Handle(h)
+    }
+
+    /// # Correctness
+    /// See requirements of `handle`
+    pub fn of<T: std::os::unix::io::IntoRawFd>(obj: T) -> Self {
+        Handle(obj.into_raw_fd() as u64)
+    }
+}
+
 /// Configures stdin for child
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum InputSpecificationData {
     Null,
     Empty,
     Pipe,
-    Handle(u64),
+    Handle(Handle),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct InputSpecification(InputSpecificationData);
 
 impl InputSpecification {
@@ -163,28 +183,19 @@ impl InputSpecification {
         Self(InputSpecificationData::Pipe)
     }
 
-    /// # Correctness
-    /// - Handle must not be used since passing to this function
-    /// - Handle must be valid
-    pub fn handle(h: u64) -> Self {
+    pub fn handle(h: Handle) -> Self {
         Self(InputSpecificationData::Handle(h))
-    }
-
-    /// # Correctness
-    /// See requirements of `handle`
-    pub fn handle_of<T: std::os::unix::io::IntoRawFd>(obj: T) -> Self {
-        Self::handle(obj.into_raw_fd() as u64)
     }
 }
 
 /// Configures stdout and stderr for child
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum OutputSpecificationData {
     Null,
     Ignore,
     Pipe,
     Buffer(Option<usize>),
-    Handle(u64),
+    Handle(Handle),
 }
 
 impl OutputSpecification {
@@ -208,25 +219,16 @@ impl OutputSpecification {
         Self(OutputSpecificationData::Buffer(None))
     }
 
-    /// # Correctness
-    /// - Handle must not be used since passing to this function
-    /// - Handle must be valid
-    pub fn handle(h: u64) -> Self {
+    pub fn handle(h: Handle) -> Self {
         Self(OutputSpecificationData::Handle(h))
-    }
-
-    /// # Correctness
-    /// See requirements of `handle`
-    pub fn handle_of<T: std::os::unix::io::IntoRawFd>(obj: T) -> Self {
-        Self::handle(obj.into_raw_fd() as u64)
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct OutputSpecification(OutputSpecificationData);
 
 /// Specifies how to provide child stdio
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct StdioSpecification {
     pub stdin: InputSpecification,
     pub stdout: OutputSpecification,
@@ -235,7 +237,7 @@ pub struct StdioSpecification {
 
 /// This type should only be used by Backend implementations
 /// Use `Command` instead
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ChildProcessOptions {
     pub path: PathBuf,
     pub arguments: Vec<OsString>,

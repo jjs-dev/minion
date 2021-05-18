@@ -21,7 +21,7 @@ pub struct Command {
 }
 
 impl Command {
-    pub fn build(&self) -> Option<ChildProcessOptions> {
+    pub fn build(self) -> Option<ChildProcessOptions> {
         let create_default_in_channel = || InputSpecification::empty();
         let create_default_out_channel = || OutputSpecification::ignore();
         let opts = ChildProcessOptions {
@@ -29,15 +29,9 @@ impl Command {
             arguments: self.argv.clone(),
             environment: self.env.clone(),
             stdio: StdioSpecification {
-                stdin: self.stdin.clone().unwrap_or_else(create_default_in_channel),
-                stdout: self
-                    .stdout
-                    .clone()
-                    .unwrap_or_else(create_default_out_channel),
-                stderr: self
-                    .stderr
-                    .clone()
-                    .unwrap_or_else(create_default_out_channel),
+                stdin: self.stdin.unwrap_or_else(create_default_in_channel),
+                stdout: self.stdout.unwrap_or_else(create_default_out_channel),
+                stderr: self.stderr.unwrap_or_else(create_default_out_channel),
             },
             pwd: self.current_dir.clone().unwrap_or_else(|| "/".into()),
         };
@@ -49,7 +43,7 @@ impl Command {
     }
 
     pub fn spawn(
-        &self,
+        self,
         backend: &dyn erased::Backend,
     ) -> anyhow::Result<Box<dyn erased::ChildProcess>> {
         let options = self

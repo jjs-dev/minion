@@ -328,9 +328,9 @@ pub unsafe extern "C" fn minion_cp_spawn(
         }
     }
     let stdio = minion::StdioSpecification {
-        stdin: minion::InputSpecification::handle(options.stdio.stdin),
-        stdout: minion::OutputSpecification::handle(options.stdio.stdout),
-        stderr: minion::OutputSpecification::handle(options.stdio.stderr),
+        stdin: minion::InputSpecification::handle(minion::Handle::new(options.stdio.stdin)),
+        stdout: minion::OutputSpecification::handle(minion::Handle::new(options.stdio.stdout)),
+        stderr: minion::OutputSpecification::handle(minion::Handle::new(options.stdio.stderr)),
     };
     let sandbox = unsafe { (*options.sandbox).0.clone() };
     let options = unsafe {
