@@ -25,16 +25,16 @@ impl Command {
         let create_default_in_channel = || InputSpecification::empty();
         let create_default_out_channel = || OutputSpecification::ignore();
         let opts = ChildProcessOptions {
-            path: self.exe.clone()?,
-            arguments: self.argv.clone(),
-            environment: self.env.clone(),
+            path: self.exe?,
+            arguments: self.argv,
+            environment: self.env,
             extra_inherit: Vec::new(),
             stdio: StdioSpecification {
                 stdin: self.stdin.unwrap_or_else(create_default_in_channel),
                 stdout: self.stdout.unwrap_or_else(create_default_out_channel),
                 stderr: self.stderr.unwrap_or_else(create_default_out_channel),
             },
-            pwd: self.current_dir.clone().unwrap_or_else(|| "/".into()),
+            pwd: self.current_dir.unwrap_or_else(|| "/".into()),
         };
         Some(opts)
     }
@@ -47,13 +47,13 @@ impl Command {
         self,
         backend: &dyn erased::Backend,
     ) -> anyhow::Result<Box<dyn erased::ChildProcess>> {
-        let options = self
-            .build()
-            .expect("spawn() was requested, but required fields were not set");
         let sandbox = self
             .sandbox
             .clone()
             .expect("spawn() was requested, but no sandbox was set");
+        let options = self
+            .build()
+            .expect("spawn() was requested, but required fields were not set");
         backend.spawn(options, sandbox)
     }
 

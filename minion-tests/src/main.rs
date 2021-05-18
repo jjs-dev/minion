@@ -58,6 +58,8 @@ pub trait TestCase: Send + Sync {
     fn process_count_limit(&self) -> u32 {
         1
     }
+    /// A way to modify child settings
+    fn modify_settings(&self, _settings: &mut minion::ChildProcessOptions) {}
     /// If this method returns false, test is skipped
     fn filter(&self, _profile: &str) -> bool {
         true

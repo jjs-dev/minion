@@ -55,11 +55,10 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
     };
     let sandbox = backend.new_sandbox(opts).expect("can not create sandbox");
     let sandbox = Arc::new(sandbox);
-    let opts = minion::ChildProcessOptions {
+    let mut opts = minion::ChildProcessOptions {
         path: "/me".into(),
         arguments: vec![test_case.name().into()],
         environment: vec![format!("{}=1", crate::TEST_ENV_NAME).into()],
-        sandbox: sandbox.clone(),
         stdio: minion::StdioSpecification {
             stdin: minion::InputSpecification::empty(),
             stdout: minion::OutputSpecification::pipe(),
@@ -68,6 +67,7 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
         extra_inherit: Vec::new(),
         pwd: "/".into(),
     };
+    test_case.modify_settings(&mut opts);
     let mut cp = backend
         .spawn(opts, sandbox.clone())
         .expect("failed to spawn child");

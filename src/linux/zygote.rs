@@ -52,6 +52,7 @@ struct JobOptions {
     argv: Vec<OsString>,
     env: Vec<OsString>,
     stdio: Stdio,
+    extra: Vec<(i32, Fd)>,
     pwd: OsString,
 }
 
@@ -67,6 +68,7 @@ struct DoExecArg<'a> {
     arguments: &'a [OsString],
     environment: &'a [OsString],
     stdio: Stdio,
+    extra_fds: &'a [(i32, Fd)],
     pwd: &'a OsStr,
     enter_handle: crate::linux::limits::OpaqueEnterHandle,
     jail_id: &'a str,
@@ -201,6 +203,10 @@ fn do_exec(arg: DoExecArg) -> ! {
         libc::dup2(arg.stdio.stdout.as_raw(), libc::STDOUT_FILENO);
         libc::dup2(arg.stdio.stderr.as_raw(), libc::STDERR_FILENO);
 
+        for (new_fd, cur_fd) in arg.extra_fds {
+            libc::dup2(cur_fd.as_raw(), *new_fd);
+        }
+
         let mut logger = crate::linux::util::StraceLogger::new();
         writeln!(
             logger,
@@ -249,6 +255,7 @@ fn spawn_job(
         arguments: &options.argv,
         environment: &options.env,
         stdio: options.stdio,
+        extra_fds: &options.extra,
         pwd: &options.pwd,
         enter_handle: resource_group_enter_handle,
         jail_id: &jail_id,

@@ -56,6 +56,9 @@ pub(crate) struct JobQuery {
     pub(crate) argv: Vec<OsString>,
     pub(crate) environment: Vec<OsString>,
     pub(crate) pwd: PathBuf,
+    /// These are just "names" of fds, actual ownership
+    /// is passed in subsequent query (right after stdio)
+    pub(crate) extra_fds: Vec<i32>,
 }
 
 /// Asks zygote for exit code of **completed** task.

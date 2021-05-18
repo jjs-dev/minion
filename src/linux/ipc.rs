@@ -117,8 +117,8 @@ impl Socket {
     }
 
     pub fn recv_fds(&mut self, fd_count: usize) -> Result<Vec<Fd>, IpcError> {
-        let mut received = Vec::new();
-        received.resize_with(fd_count, || Fd::new(0));
+        let mut received = Vec::<Option<Fd>>::new();
+        received.resize_with(fd_count, || None);
         let mut buf = [0; 1];
         let mut cmsg_space = nix::cmsg_space!([Fd; FD_CHUNK_SIZE]);
 
@@ -138,13 +138,13 @@ impl Socket {
                         return Err(IpcError::Ancillary);
                     }
                     for (i, x) in fds.iter().enumerate() {
-                        chunk[i] = Fd::new(*x);
+                        chunk[i] = Some(Fd::new(*x));
                     }
                 }
                 _ => return Err(IpcError::Ancillary),
             }
         }
-        Ok(received)
+        Ok(received.into_iter().map(Option::unwrap).collect())
     }
 }
 

@@ -88,7 +88,7 @@ fn execute_single_test(case: &dyn TestCase, exec_opts: &ExecuteOptions) -> Outco
     let mut cmd = if exec_opts.trace {
         let mut cmd = std::process::Command::new("strace");
         cmd.arg("-f"); // follow forks
-        cmd.arg("-s").arg("128"); // print longer string prefixes
+        cmd.arg("-s").arg("512"); // print longer string prefixes
         cmd.arg("-o").arg(format!(
             "strace-log-{}-{}.txt",
             exec_opts.profile,

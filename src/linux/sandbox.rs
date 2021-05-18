@@ -124,6 +124,7 @@ pub(crate) struct ExtendedJobQuery {
     pub(crate) stdin: Option<Fd>,
     pub(crate) stdout: Option<Fd>,
     pub(crate) stderr: Option<Fd>,
+    pub(crate) extra: Vec<Fd>,
 }
 
 impl LinuxSandbox {
@@ -235,17 +236,18 @@ impl LinuxSandbox {
 
     pub(crate) unsafe fn spawn_job(
         &self,
-        query: ExtendedJobQuery,
+        mut query: ExtendedJobQuery,
     ) -> Result<(jail_common::JobStartupInfo, Fd), Error> {
         let q = jail_common::Query::Spawn(query.job_query.clone());
 
         self.with_zygote(|zyg| {
             zyg.sock.send(&q)?;
 
-            let fds = vec![query.stdin, query.stdout, query.stderr]
+            let mut fds = vec![query.stdin, query.stdout, query.stderr]
                 .into_iter()
                 .flatten()
                 .collect::<Vec<_>>();
+            fds.append(&mut query.extra);
             zyg.sock.send_fds(&fds)?;
             let job_startup_info = zyg.sock.recv()?;
             let fd = zyg.sock.recv_fds(1)?;

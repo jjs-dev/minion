@@ -15,6 +15,7 @@ fn get_tests() -> Vec<&'static dyn TestCase> {
         extend_lifetime(simple::TRet1),
         extend_lifetime(simple::TOom),
         extend_lifetime(simple::TSecurity),
+        extend_lifetime(simple::TInherit),
     ]
 }
 

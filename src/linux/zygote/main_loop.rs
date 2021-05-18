@@ -46,29 +46,40 @@ impl Zygote<'_, '_> {
         let mut logger = StraceLogger::new();
         writeln!(logger, "got Spawn request").ok();
         // Now we do some preprocessing.
-        let env: Vec<_> = options.environment.clone();
 
-        let child_fds = self.options.sock.recv_fds(3).unwrap();
-        let mut child_fds = {
-            let mut it = child_fds.into_iter();
-            let a = it.next().unwrap();
-            let b = it.next().unwrap();
-            let c = it.next().unwrap();
-            [a, b, c]
+        let mut child_fds = self
+            .options
+            .sock
+            .recv_fds(3 + options.extra_fds.len())
+            .unwrap();
+        let (mut stdio_fds, mut extra_fds) = {
+            child_fds.rotate_left(3);
+            let c = child_fds.pop().unwrap();
+            let b = child_fds.pop().unwrap();
+            let a = child_fds.pop().unwrap();
+            ([a, b, c], child_fds)
         };
-        for f in child_fds.iter_mut() {
+        for f in stdio_fds.iter_mut() {
             *f = f
                 .duplicate_with_inheritance()
                 .expect("failed to duplicate child stdio fd");
         }
-        let child_stdio = Stdio::from_fd_array(child_fds);
+        for f in extra_fds.iter_mut() {
+            *f = f
+                .duplicate_with_inheritance()
+                .expect("failed to duplicate child extra fd");
+        }
+        let child_stdio = Stdio::from_fd_array(stdio_fds);
+
+        assert_eq!(extra_fds.len(), options.extra_fds.len());
 
         let job_options = JobOptions {
             exe: options.image_path.clone(),
             argv: options.argv.clone(),
-            env,
+            env: options.environment.clone(),
             stdio: child_stdio,
             pwd: options.pwd.clone().into_os_string(),
+            extra: options.extra_fds.iter().copied().zip(extra_fds).collect(),
         };
 
         writeln!(logger, "JobOptions are fetched").ok();
