@@ -339,6 +339,7 @@ pub unsafe extern "C" fn minion_cp_spawn(
             arguments,
             environment,
             stdio,
+            extra_inherit: Vec::new(),
             pwd: get_string(options.workdir).into(),
         }
     };

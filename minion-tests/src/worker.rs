@@ -59,11 +59,13 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
         path: "/me".into(),
         arguments: vec![test_case.name().into()],
         environment: vec![format!("{}=1", crate::TEST_ENV_NAME).into()],
+        sandbox: sandbox.clone(),
         stdio: minion::StdioSpecification {
             stdin: minion::InputSpecification::empty(),
             stdout: minion::OutputSpecification::pipe(),
             stderr: minion::OutputSpecification::pipe(),
         },
+        extra_inherit: Vec::new(),
         pwd: "/".into(),
     };
     let mut cp = backend

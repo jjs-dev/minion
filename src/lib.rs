@@ -243,6 +243,7 @@ pub struct ChildProcessOptions {
     pub arguments: Vec<OsString>,
     pub environment: Vec<OsString>,
     pub stdio: StdioSpecification,
+    pub extra_inherit: Vec<Handle>,
     /// Child's working dir. Relative to `sandbox` isolation_root
     pub pwd: PathBuf,
 }

@@ -28,6 +28,7 @@ impl Command {
             path: self.exe.clone()?,
             arguments: self.argv.clone(),
             environment: self.env.clone(),
+            extra_inherit: Vec::new(),
             stdio: StdioSpecification {
                 stdin: self.stdin.unwrap_or_else(create_default_in_channel),
                 stdout: self.stdout.unwrap_or_else(create_default_out_channel),

@@ -164,6 +164,7 @@ async fn main() {
             stdout: minion::OutputSpecification::handle(minion::Handle::new(stdout_fd)),
             stderr: minion::OutputSpecification::handle(minion::Handle::new(stderr_fd)),
         },
+        extra_inherit: Vec::new(),
         pwd: options.pwd.into(),
     };
     if options.dump_minion_params {
