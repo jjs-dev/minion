@@ -332,17 +332,17 @@ pub unsafe extern "C" fn minion_cp_spawn(
         stdout: minion::OutputSpecification::handle(options.stdio.stdout),
         stderr: minion::OutputSpecification::handle(options.stdio.stderr),
     };
+    let sandbox = unsafe { (*options.sandbox).0.clone() };
     let options = unsafe {
         minion::ChildProcessOptions {
             path: get_string(options.image_path).into(),
             arguments,
             environment,
-            sandbox: (*options.sandbox).0.clone(),
             stdio,
             pwd: get_string(options.workdir).into(),
         }
     };
-    let cp = backend.0.spawn(options).unwrap();
+    let cp = backend.0.spawn(options, sandbox).unwrap();
     let cp = ChildProcess(cp);
     let cp = Box::new(cp);
     *out = Box::into_raw(cp);

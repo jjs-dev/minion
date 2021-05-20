@@ -157,7 +157,10 @@ fn handle_output_io(
     }
 }
 
-fn spawn(mut options: ChildProcessOptions<LinuxSandbox>) -> Result<LinuxChildProcess, Error> {
+fn spawn(
+    mut options: ChildProcessOptions,
+    sandbox: Arc<LinuxSandbox>,
+) -> Result<LinuxChildProcess, Error> {
     unsafe {
         let q = jail_common::JobQuery {
             image_path: options.path.clone(),
@@ -180,14 +183,14 @@ fn spawn(mut options: ChildProcessOptions<LinuxSandbox>) -> Result<LinuxChildPro
             stderr: err_w,
         };
 
-        let (job_startup_info, exit_fd) = options.sandbox.spawn_job(q)?;
+        let (job_startup_info, exit_fd) = sandbox.spawn_job(q)?;
 
         Ok(LinuxChildProcess {
             exit_code: AtomicI64::new(EXIT_CODE_STILL_RUNNING),
             stdin: in_w,
             stdout: out_r,
             stderr: err_r,
-            sandbox_ref: options.sandbox,
+            sandbox_ref: sandbox,
             pid: job_startup_info.pid,
             fd: Some(exit_fd),
         })
@@ -354,9 +357,10 @@ impl Backend for LinuxBackend {
 
     fn spawn(
         &self,
-        options: ChildProcessOptions<LinuxSandbox>,
+        options: ChildProcessOptions,
+        sandbox: Arc<LinuxSandbox>,
     ) -> Result<Self::ChildProcess, Error> {
-        spawn(options)
+        spawn(options, sandbox)
     }
 }
 

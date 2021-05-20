@@ -1,4 +1,6 @@
-use crate::{erased, InputSpecification, OutputSpecification, StdioSpecification};
+use crate::{
+    erased, ChildProcessOptions, InputSpecification, OutputSpecification, StdioSpecification,
+};
 use std::{
     ffi::{OsStr, OsString},
     path::{Path, PathBuf},
@@ -19,14 +21,13 @@ pub struct Command {
 }
 
 impl Command {
-    pub fn build(&self) -> Option<erased::ChildProcessOptions> {
+    pub fn build(&self) -> Option<ChildProcessOptions> {
         let create_default_in_channel = || InputSpecification::empty();
         let create_default_out_channel = || OutputSpecification::ignore();
-        let opts = erased::ChildProcessOptions {
+        let opts = ChildProcessOptions {
             path: self.exe.clone()?,
             arguments: self.argv.clone(),
             environment: self.env.clone(),
-            sandbox: self.sandbox.clone()?,
             stdio: StdioSpecification {
                 stdin: self.stdin.clone().unwrap_or_else(create_default_in_channel),
                 stdout: self
@@ -54,7 +55,11 @@ impl Command {
         let options = self
             .build()
             .expect("spawn() was requested, but required fields were not set");
-        backend.spawn(options)
+        let sandbox = self
+            .sandbox
+            .clone()
+            .expect("spawn() was requested, but no sandbox was set");
+        backend.spawn(options, sandbox)
     }
 
     pub fn sandbox(&mut self, sandbox: Arc<dyn erased::Sandbox>) -> &mut Self {

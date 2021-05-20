@@ -7,6 +7,8 @@ use std::{any::Any, sync::Arc};
 
 use futures_util::{FutureExt, TryFutureExt};
 
+use crate::ChildProcessOptions;
+
 /// Type-erased `Sandbox`
 pub trait Sandbox: std::fmt::Debug + Send + Sync + 'static {
     fn id(&self) -> String;
@@ -76,7 +78,11 @@ impl<C: crate::ChildProcess> ChildProcess for C {
 /// Type-erased `Backend`
 pub trait Backend: Send + Sync + 'static {
     fn new_sandbox(&self, options: crate::SandboxOptions) -> anyhow::Result<Arc<dyn Sandbox>>;
-    fn spawn(&self, options: ChildProcessOptions) -> anyhow::Result<Box<dyn ChildProcess>>;
+    fn spawn(
+        &self,
+        options: ChildProcessOptions,
+        sandbox: Arc<dyn Sandbox>,
+    ) -> anyhow::Result<Box<dyn ChildProcess>>;
 }
 
 impl<B: crate::Backend> Backend for B {
@@ -85,8 +91,12 @@ impl<B: crate::Backend> Backend for B {
         Ok(Arc::new(sb))
     }
 
-    fn spawn(&self, options: ChildProcessOptions) -> anyhow::Result<Box<dyn ChildProcess>> {
-        let any_sandbox = options.sandbox.clone().into_arc_any();
+    fn spawn(
+        &self,
+        options: ChildProcessOptions,
+        sandbox: Arc<dyn Sandbox>,
+    ) -> anyhow::Result<Box<dyn ChildProcess>> {
+        let any_sandbox = sandbox.into_arc_any();
         let down_sandbox = any_sandbox.downcast().expect("sandbox type mismatch");
         let down_options = crate::ChildProcessOptions {
             arguments: options.arguments,
@@ -94,14 +104,11 @@ impl<B: crate::Backend> Backend for B {
             path: options.path,
             pwd: options.pwd,
             stdio: options.stdio,
-            sandbox: down_sandbox,
         };
-        let cp = <Self as crate::Backend>::spawn(&self, down_options)?;
+        let cp = <Self as crate::Backend>::spawn(&self, down_options, down_sandbox)?;
         Ok(Box::new(cp))
     }
 }
-
-pub type ChildProcessOptions = crate::ChildProcessOptions<dyn Sandbox>;
 
 /// Returns backend instance
 pub fn setup() -> anyhow::Result<Box<dyn Backend>> {
