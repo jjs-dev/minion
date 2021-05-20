@@ -98,15 +98,7 @@ impl<B: crate::Backend> Backend for B {
     ) -> anyhow::Result<Box<dyn ChildProcess>> {
         let any_sandbox = sandbox.into_arc_any();
         let down_sandbox = any_sandbox.downcast().expect("sandbox type mismatch");
-        let down_options = crate::ChildProcessOptions {
-            path: options.path,
-            arguments: options.arguments,
-            environment: options.environment,
-            stdio: options.stdio,
-            extra_inherit: Vec::new(),
-            pwd: options.pwd,
-        };
-        let cp = <Self as crate::Backend>::spawn(&self, down_options, down_sandbox)?;
+        let cp = <Self as crate::Backend>::spawn(&self, options, down_sandbox)?;
         Ok(Box::new(cp))
     }
 }
