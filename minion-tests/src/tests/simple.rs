@@ -1,5 +1,6 @@
 //! Tests that simple program that does nothing completes successfully.
 use minion::erased::Sandbox;
+use std::process::exit;
 
 pub(crate) struct TOk;
 impl crate::TestCase for TOk {
@@ -188,6 +189,49 @@ impl crate::TestCase for TSecurity {
     fn filter(&self, profile: &str) -> bool {
         // FIXME
         profile != "prlimit-rootless"
+    }
+}
+pub(crate) struct TInherit;
+impl crate::TestCase for TInherit {
+    fn name(&self) -> &'static str {
+        "test_handle_inheritance"
+    }
+
+    fn description(&self) -> &'static str {
+        "verifies that handle inheritance works"
+    }
+
+    fn test(&self) -> ! {
+        if nix::unistd::write(1, b"stdout").is_err() {
+            exit(1);
+        }
+        if nix::unistd::write(2, b"stderr").is_err() {
+            exit(2);
+        }
+        let mut buf = [0; 8];
+        if nix::unistd::read(779, &mut buf) != Ok(8) {
+            exit(3);
+        }
+        if buf != *b"hi there" {
+            exit(4);
+        }
+
+        exit(0)
+    }
+
+    fn check(&self, mut cp: crate::CompletedChild, _sb: &dyn Sandbox) {
+        super::assert_exit_code(cp.by_ref(), minion::ExitCode::OK);
+        super::assert_contains(cp.stdout, b"stdout");
+        super::assert_contains(cp.stderr, b"stderr");
+    }
+
+    fn modify_settings(&self, settings: &mut minion::ChildProcessOptions) {
+        let (rx, tx) = nix::unistd::pipe().expect("failed to create a pipe");
+        nix::unistd::write(tx, b"hi there").expect("failed to send a message to the pipe");
+        nix::unistd::close(tx).expect("failed to close tx");
+        nix::unistd::dup2(rx, 779).expect("failed to copy rx to 779");
+        nix::unistd::close(rx).expect("failed to close rx");
+        settings.extra_inherit.push(minion::Handle::new(779));
     }
 }
 

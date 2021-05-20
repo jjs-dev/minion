@@ -103,7 +103,7 @@ fn handle_input_io(
             Ok((Some(tx), Some(f)))
         }
         InputSpecificationData::Handle(rh) => {
-            let h = Fd::new(rh as RawFd);
+            let h = Fd::new(rh.0 as RawFd);
             Ok((None, Some(h)))
         }
         InputSpecificationData::Empty => {
@@ -122,7 +122,7 @@ fn handle_output_io(
 ) -> Result<(Option<LinuxReadPipe>, Option<Fd>), Error> {
     match spec.0 {
         OutputSpecificationData::Null => Ok((None, None)),
-        OutputSpecificationData::Handle(rh) => Ok((None, Some(Fd::new(rh as RawFd)))),
+        OutputSpecificationData::Handle(rh) => Ok((None, Some(Fd::new(rh.0 as RawFd)))),
         OutputSpecificationData::Pipe => {
             let (tx, rx) = pipe::setup_pipe()?;
             let f = tx.inner().duplicate_with_inheritance()?;
@@ -169,6 +169,7 @@ fn spawn(
                 .into_iter()
                 .collect(),
             pwd: options.pwd.clone(),
+            extra_fds: options.extra_inherit.iter().map(|h| h.0 as i32).collect(),
         };
 
         let (in_w, in_r) = handle_input_io(options.stdio.stdin)?;
@@ -181,6 +182,11 @@ fn spawn(
             stdin: in_r,
             stdout: out_w,
             stderr: err_w,
+            extra: options
+                .extra_inherit
+                .iter()
+                .map(|h| Fd::new(h.0 as i32))
+                .collect(),
         };
 
         let (job_startup_info, exit_fd) = sandbox.spawn_job(q)?;
