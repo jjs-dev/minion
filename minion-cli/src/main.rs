@@ -159,7 +159,6 @@ async fn main() {
             .iter()
             .map(|v| format!("{}={}", &v.name, &v.value).into())
             .collect(),
-        sandbox: sandbox.clone(),
         stdio: minion::StdioSpecification {
             stdin: minion::InputSpecification::handle(stdin_fd),
             stdout: minion::OutputSpecification::handle(stdout_fd),
@@ -170,7 +169,7 @@ async fn main() {
     if options.dump_minion_params {
         println!("{:#?}", args);
     }
-    let mut cp = backend.spawn(args).unwrap();
+    let mut cp = backend.spawn(args, sandbox.clone()).unwrap();
     let exit_code = cp.wait_for_exit().unwrap().await.unwrap();
     println!("---> Child process exited with code {:?} <---", exit_code);
     if sandbox.check_cpu_tle().unwrap() {

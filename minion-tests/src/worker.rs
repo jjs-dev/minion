@@ -64,10 +64,11 @@ async fn inner_main(test_cases: &[&'static dyn TestCase]) {
             stdout: minion::OutputSpecification::pipe(),
             stderr: minion::OutputSpecification::pipe(),
         },
-        sandbox: sandbox.clone(),
         pwd: "/".into(),
     };
-    let mut cp = backend.spawn(opts).expect("failed to spawn child");
+    let mut cp = backend
+        .spawn(opts, sandbox.clone())
+        .expect("failed to spawn child");
     let exit_code = cp
         .wait_for_exit()
         .expect("failed to start waiting")

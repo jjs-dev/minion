@@ -37,7 +37,8 @@ pub trait Backend: Debug + Send + Sync + 'static {
     fn new_sandbox(&self, options: SandboxOptions) -> Result<Self::Sandbox, Self::Error>;
     fn spawn(
         &self,
-        options: ChildProcessOptions<Self::Sandbox>,
+        options: ChildProcessOptions,
+        sandbox: Arc<Self::Sandbox>,
     ) -> Result<Self::ChildProcess, Self::Error>;
 }
 
@@ -235,11 +236,10 @@ pub struct StdioSpecification {
 /// This type should only be used by Backend implementations
 /// Use `Command` instead
 #[derive(Debug, Clone)]
-pub struct ChildProcessOptions<Sandbox: ?Sized> {
+pub struct ChildProcessOptions {
     pub path: PathBuf,
     pub arguments: Vec<OsString>,
     pub environment: Vec<OsString>,
-    pub sandbox: Arc<Sandbox>,
     pub stdio: StdioSpecification,
     /// Child's working dir. Relative to `sandbox` isolation_root
     pub pwd: PathBuf,
