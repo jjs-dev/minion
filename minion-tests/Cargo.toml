@@ -8,7 +8,7 @@ edition = "2018"
 once_cell = "1.7.2"
 minion = {path = "..", features = ["internal_dev"]}
 clap = "3.0.0-beta.2"
-nix = "0.20.0"
+nix = "0.20.2"
 tempfile = "3.2.0"
 tokio = { version = "1.4.0", features = ["macros", "rt"] }
 tracing-subscriber = "0.2.17"
