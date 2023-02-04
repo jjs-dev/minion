@@ -10,6 +10,6 @@ minion = {path = "..", features = ["internal_dev"]}
 clap = "3.0.0-beta.2"
 nix = "0.20.0"
 tempfile = "3.2.0"
-tokio = { version = "1.4.0", features = ["macros", "rt"] }
+tokio = { version = "1.18.5", features = ["macros", "rt"] }
 tracing-subscriber = "0.2.17"
 tracing = "0.1.25"
